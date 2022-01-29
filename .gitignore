@@ -1,5 +1,9 @@
 build/*
 
+data/ai-edge-contest-5/videos/*
+
+!.gitkeep
+
 # Prerequisites
 *.d
 
