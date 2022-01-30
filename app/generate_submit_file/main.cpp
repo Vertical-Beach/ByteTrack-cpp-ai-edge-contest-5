@@ -136,6 +136,7 @@ int main(int argc, char *argv[])
         auto detection_results_filename_itr = detection_results_path.begin();
         for (const auto &video_path : videos_path)
         {
+            std::cout << video_path.filename() << std::endl;
             const std::string video_basename = video_path.stem();
             const auto read_json = [&](decltype(detection_results_path)::iterator &itr, boost::property_tree::ptree &pt) -> bool
             {
@@ -197,7 +198,9 @@ int main(int argc, char *argv[])
                 for (const auto &output : outputs_car)
                 {
                     const auto rect2i = get_valid_rect(output->getRect());
-                    const auto area_is_valid = (1024 <= rect2i.area());
+                    const auto area_is_valid = (1024 <= rect2i.area() &&
+                                                0 <= rect2i.tl().x && 0 <= rect2i.tl().y &&
+                                                rect2i.br().x < images[fi].size().width && rect2i.br().y < images[fi].size().height);
                     if (area_is_valid)
                     {
                         boost::property_tree::ptree obj_pt;
@@ -211,7 +214,9 @@ int main(int argc, char *argv[])
                 for (const auto &output : outputs_pedestrian)
                 {
                     const auto rect2i = get_valid_rect(output->getRect());
-                    const auto area_is_valid = (1024 <= rect2i.area());
+                    const auto area_is_valid = (1024 <= rect2i.area() &&
+                                                0 <= rect2i.tl().x && 0 <= rect2i.tl().y &&
+                                                rect2i.br().x < images[fi].size().width && rect2i.br().y < images[fi].size().height);
                     if (area_is_valid)
                     {
                         boost::property_tree::ptree obj_pt;
@@ -240,7 +245,15 @@ int main(int argc, char *argv[])
                 break;
             }
         }
-        boost::property_tree::write_json("predictions.json", submit_pt);
+        std::ostringstream oss;
+        boost::property_tree::write_json(oss, submit_pt);
+
+        std::regex reg1("\\\"([0-9]+\\.{0,1}[0-9]*)\\\"");
+        std::regex reg2("\\\"\\\"");
+        std::ofstream file;
+        file.open("predictions.json");
+        file << std::regex_replace(std::regex_replace(oss.str(), reg1, "$1"), reg2, "{}");
+        file.close();
     }
     catch (const std::exception &e)
     {
