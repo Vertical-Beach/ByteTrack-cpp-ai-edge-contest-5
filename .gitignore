@@ -1,6 +1,7 @@
 build/*
 
-data/ai-edge-contest-5/videos/*
+data/ai-edge-contest-5/test/videos/*
+data/ai-edge-contest-5/train/videos/*
 
 !.gitkeep
 
