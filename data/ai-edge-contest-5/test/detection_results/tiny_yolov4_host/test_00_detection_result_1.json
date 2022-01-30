@@ -1,4 +1,7 @@
 {
+  "name": "test_00",
+  "fps": 30,
+  "track_buffer": 30,
   "results": [
     {
       "frame_id": "0",
