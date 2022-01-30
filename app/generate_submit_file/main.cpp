@@ -171,8 +171,8 @@ int main(int argc, char *argv[])
             const auto inputs_pedestrian = get_inputs(pt_results_pedestrian, images.size());
 
             // Execute tracking
-            byte_track::BYTETracker car_tracker(fps);
-            byte_track::BYTETracker pedestrian_tracker(fps);
+            byte_track::BYTETracker car_tracker(fps, fps);
+            byte_track::BYTETracker pedestrian_tracker(fps, fps);
 
             std::vector<cv::Mat> draw_images;
             std::vector<std::vector<byte_track::STrack>> outputs_car;
