@@ -66,7 +66,7 @@ namespace
         return ret;
     }
 
-    std::vector<std::vector<byte_track::Object>> get_inputs_ref(const boost::property_tree::ptree &pt, const size_t &total_frame)
+    std::vector<std::vector<byte_track::Object>> get_inputs(const boost::property_tree::ptree &pt, const size_t &total_frame)
     {
         std::vector<std::vector<byte_track::Object>> inputs_ref;
         inputs_ref.resize(total_frame);
@@ -84,7 +84,7 @@ namespace
         return inputs_ref;
     }
 
-    cv::Rect2i get_valid_rect(const byte_track::Rect<float> &rect)
+    cv::Rect2i get_rounded_rect2i(const byte_track::Rect<float> &rect)
     {
         return cv::Rect2i(
             std::round(rect.x()),
@@ -163,81 +163,128 @@ int main(int argc, char *argv[])
 
             // Get video info
             const auto [images, fps] = read_video(video_path);
+            const auto width = images[0].size().width;
+            const auto height = images[0].size().height;
 
             // Get detection results
-            const auto inputs_ref_car = get_inputs_ref(pt_results_car, images.size());
-            const auto inputs_ref_pedestrian = get_inputs_ref(pt_results_pedestrian, images.size());
+            const auto inputs_car = get_inputs(pt_results_car, images.size());
+            const auto inputs_pedestrian = get_inputs(pt_results_pedestrian, images.size());
 
             // Execute tracking
             byte_track::BYTETracker car_tracker(fps);
             byte_track::BYTETracker pedestrian_tracker(fps);
 
             std::vector<cv::Mat> draw_images;
-            boost::property_tree::ptree frames_pt;
+            std::vector<std::vector<byte_track::STrack>> outputs_car;
+            std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
             for (size_t fi = 0; fi < images.size(); fi++)
             {
                 draw_images.push_back(images[fi].clone());
-                const auto outputs_car = car_tracker.update(inputs_ref_car[fi]);
-                const auto outputs_pedestrian = pedestrian_tracker.update(inputs_ref_pedestrian[fi]);
+                const auto copy = [](const auto tracker_outputs, auto &outputs) -> void
+                {
+                    outputs.emplace_back();
+                    for (const auto &tracker_output : tracker_outputs)
+                    {
+                        // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
+                        outputs.back().push_back(*tracker_output.get());
+                    }
+                };
+                copy(car_tracker.update(inputs_car[fi]), outputs_car);
+                copy(pedestrian_tracker.update(inputs_pedestrian[fi]), outputs_pedestrian);
+            }
 
-                const auto get_obj_pt = [](boost::property_tree::ptree &pt, const cv::Rect2i &rect, const size_t &track_id) -> void {
-                    boost::property_tree::ptree box2d_pt, tl_x_pt, tl_y_pt, br_x_pt, br_y_pt;
-                    tl_x_pt.put_value(rect.tl().x);
-                    tl_y_pt.put_value(rect.tl().y);
-                    br_x_pt.put_value(rect.br().x);
-                    br_y_pt.put_value(rect.br().y);
-                    box2d_pt.push_back({"", tl_x_pt});
-                    box2d_pt.push_back({"", tl_y_pt});
-                    box2d_pt.push_back({"", br_x_pt});
-                    box2d_pt.push_back({"", br_y_pt});
-                    pt.put("id", track_id);
-                    pt.add_child("box2d", box2d_pt);
+            // Results: vector of vector{track_id, rect}, and the idx means frame_id
+            using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;
+
+            // Validate tracks
+            const auto validate_outputs = [&](const std::vector<std::vector<byte_track::STrack>> &outputs) -> Results
+            {
+                // track_id -> vector of {frame_id, rect}
+                std::map<size_t, std::vector<std::pair<size_t, cv::Rect2i>>> map;
+
+                // Encode from std::vector<byte_track::STrack> to std::map<size_t, std::vector<std::pair<size_t, byte_track::Rect<float>>>>
+                for (size_t fi = 0; fi < outputs.size(); fi++)
+                {
+                    for (size_t oi = 0; oi < outputs[fi].size(); oi++)
+                    {
+                        const auto &strack = outputs[fi][oi];
+                        const auto rect2i = get_rounded_rect2i(strack.getRect());
+                        if (1024 <= rect2i.area() &&
+                            0 <= rect2i.tl().x && 0 <= rect2i.tl().y &&
+                            rect2i.br().x < width && rect2i.br().y < height)
+                        {
+                            map.try_emplace(strack.getTrackId(), std::vector<std::pair<size_t, cv::Rect2i>>());
+                            map[strack.getTrackId()].emplace_back(fi, rect2i);
+                        }
+                    }
+                }
+
+                // Validate
+                Results result(draw_images.size());
+                for (const auto &[track_id, stracks] : map)
+                {
+                    if (stracks.size() < 3)
+                    {
+                        continue;
+                    }
+                    for (const auto &[frame_id, rect] : stracks)
+                    {
+                        result[frame_id].emplace_back(track_id, rect);
+                    }
+                }
+                return result;
+            };
+
+            auto results_car = validate_outputs(outputs_car);
+            auto results_pedestrian = validate_outputs(outputs_pedestrian);
+
+            // Generate submit file
+            boost::property_tree::ptree frames_pt;
+            for (size_t fi = 0; fi < images.size(); fi++)
+            {
+                boost::property_tree::ptree frame_pt;
+                const auto gen_objs_pt_and_draw_rect = [&](Results &results,
+                                                           const std::string &name) -> void
+                {
+                    const auto get_obj_pt = [](boost::property_tree::ptree &pt,
+                                               const cv::Rect2i &rect,
+                                               const size_t &track_id) -> void
+                    {
+                        boost::property_tree::ptree box2d_pt, tl_x_pt, tl_y_pt, br_x_pt, br_y_pt;
+                        tl_x_pt.put_value(rect.tl().x);
+                        tl_y_pt.put_value(rect.tl().y);
+                        br_x_pt.put_value(rect.br().x);
+                        br_y_pt.put_value(rect.br().y);
+                        box2d_pt.push_back({"", tl_x_pt});
+                        box2d_pt.push_back({"", tl_y_pt});
+                        box2d_pt.push_back({"", br_x_pt});
+                        box2d_pt.push_back({"", br_y_pt});
+                        pt.put("id", track_id);
+                        pt.add_child("box2d", box2d_pt);
+                    };
+
+                    boost::property_tree::ptree objs_pt;
+                    for (const auto &[track_id, rect] : results[fi])
+                    {
+                        boost::property_tree::ptree obj_pt;
+                        get_obj_pt(obj_pt, rect, track_id);
+                        objs_pt.push_back({"", obj_pt});
+                        draw_rect(draw_images[fi], rect, track_id, name.substr(0, 1));
+                    }
+                    if (objs_pt.size() != 0)
+                    {
+                        frame_pt.add_child(name, objs_pt);
+                    }
                 };
 
-                boost::property_tree::ptree cars_pt;
-                for (const auto &output : outputs_car)
-                {
-                    const auto rect2i = get_valid_rect(output->getRect());
-                    const auto area_is_valid = (1024 <= rect2i.area() &&
-                                                0 <= rect2i.tl().x && 0 <= rect2i.tl().y &&
-                                                rect2i.br().x < images[fi].size().width && rect2i.br().y < images[fi].size().height);
-                    if (area_is_valid)
-                    {
-                        boost::property_tree::ptree obj_pt;
-                        get_obj_pt(obj_pt, rect2i, output->getTrackId());
-                        cars_pt.push_back({"", obj_pt});
-                        draw_rect(draw_images[fi], rect2i, output->getTrackId(), "C");
-                    }
-                }
-
-                boost::property_tree::ptree pedestrians_pt;
-                for (const auto &output : outputs_pedestrian)
-                {
-                    const auto rect2i = get_valid_rect(output->getRect());
-                    const auto area_is_valid = (1024 <= rect2i.area() &&
-                                                0 <= rect2i.tl().x && 0 <= rect2i.tl().y &&
-                                                rect2i.br().x < images[fi].size().width && rect2i.br().y < images[fi].size().height);
-                    if (area_is_valid)
-                    {
-                        boost::property_tree::ptree obj_pt;
-                        get_obj_pt(obj_pt, rect2i, output->getTrackId());
-                        pedestrians_pt.push_back({"", obj_pt});
-                        draw_rect(draw_images[fi], rect2i, output->getTrackId(), "P");
-                    }
-                }
-
-                boost::property_tree::ptree frame_pt;
-                if (cars_pt.size() != 0)
-                {
-                    frame_pt.add_child("Car", cars_pt);
-                }
-                if (pedestrians_pt.size() != 0)
-                {
-                    frame_pt.add_child("Pedestrian", pedestrians_pt);
-                }
+                gen_objs_pt_and_draw_rect(results_car, "Car");
+                gen_objs_pt_and_draw_rect(results_pedestrian, "Pedestrian");
                 frames_pt.push_back({"", frame_pt});
             }
+
             submit_pt.add_child(boost::property_tree::path(video_path.filename().string(), '\0'), frames_pt);
+
+            // Write video with tracking result
             write_video(draw_images, video_path.filename(), fps);
 
             if (detection_results_filename_itr == detection_results_path.end())
@@ -245,6 +292,8 @@ int main(int argc, char *argv[])
                 break;
             }
         }
+
+        // Write submit file
         std::ostringstream oss;
         boost::property_tree::write_json(oss, submit_pt);
 
