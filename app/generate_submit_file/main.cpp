@@ -66,7 +66,10 @@ namespace
         return ret;
     }
 
-    std::vector<std::vector<byte_track::Object>> get_inputs(const boost::property_tree::ptree &pt, const size_t &total_frame)
+    std::vector<std::vector<byte_track::Object>> get_inputs(const boost::property_tree::ptree &pt,
+                                                            const size_t &total_frame,
+                                                            const int &im_width,
+                                                            const int &im_height)
     {
         std::vector<std::vector<byte_track::Object>> inputs_ref;
         inputs_ref.resize(total_frame);
@@ -75,23 +78,22 @@ namespace
             const boost::property_tree::ptree &result = child.second;
             const auto frame_id = get_data<int>(result, "frame_id");
             const auto prob = get_data<float>(result, "prob");
-            const auto x = get_data<float>(result, "x");
-            const auto y = get_data<float>(result, "y");
-            const auto width = get_data<float>(result, "width");
-            const auto height = get_data<float>(result, "height");
+            const auto x = std::clamp(get_data<float>(result, "x"), 0.F, im_width - 1.F);
+            const auto y = std::clamp(get_data<float>(result, "y"), 0.F, im_height - 1.F);
+            const auto width = std::clamp(get_data<float>(result, "width"), 0.F, im_width - x);
+            const auto height = std::clamp(get_data<float>(result, "height"), 0.F, im_height - y);
             inputs_ref[frame_id].emplace_back(byte_track::Rect(x, y, width, height), 0, prob);
         }
         return inputs_ref;
     }
 
-    cv::Rect2i get_rounded_rect2i(const byte_track::Rect<float> &rect)
+    cv::Rect2i get_rounded_rect2i(const byte_track::Rect<float> &rect, const int &im_width, const int &im_height)
     {
-        return cv::Rect2i(
-            std::round(rect.x()),
-            std::round(rect.y()),
-            std::round(rect.width()),
-            std::round(rect.height())
-        );
+        const auto x = std::clamp(static_cast<int>(std::round(rect.x())), 0, im_width - 1);
+        const auto y = std::clamp(static_cast<int>(std::round(rect.y())), 0, im_height - 1);
+        const auto width = std::clamp(static_cast<int>(std::round(rect.width())), 0, im_width - x);
+        const auto height = std::clamp(static_cast<int>(std::round(rect.height())), 0, im_height - y);
+        return cv::Rect2i(x, y, width, height);
     }
 
     void draw_rect(cv::Mat &image, const cv::Rect2i &rect, const size_t &track_id, const std::string &label)
@@ -167,8 +169,8 @@ int main(int argc, char *argv[])
             const auto height = images[0].size().height;
 
             // Get detection results
-            const auto inputs_car = get_inputs(pt_results_car, images.size());
-            const auto inputs_pedestrian = get_inputs(pt_results_pedestrian, images.size());
+            const auto inputs_car = get_inputs(pt_results_car, images.size(), width, height);
+            const auto inputs_pedestrian = get_inputs(pt_results_pedestrian, images.size(), width, height);
 
             // Execute tracking
             byte_track::BYTETracker car_tracker(fps, fps);
@@ -208,10 +210,8 @@ int main(int argc, char *argv[])
                     for (size_t oi = 0; oi < outputs[fi].size(); oi++)
                     {
                         const auto &strack = outputs[fi][oi];
-                        const auto rect2i = get_rounded_rect2i(strack.getRect());
-                        if (1024 <= rect2i.area() &&
-                            0 <= rect2i.tl().x && 0 <= rect2i.tl().y &&
-                            rect2i.br().x < width && rect2i.br().y < height)
+                        const auto rect2i = get_rounded_rect2i(strack.getRect(), width, height);
+                        if (1024 <= rect2i.area())
                         {
                             map.try_emplace(strack.getTrackId(), std::vector<std::pair<size_t, cv::Rect2i>>());
                             map[strack.getTrackId()].emplace_back(fi, rect2i);
