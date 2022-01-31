@@ -40,6 +40,8 @@ include_directories(
 add_library(${PROJECT_NAME} SHARED
   ${PROJECT_SOURCE_DIR}/src/BYTETracker.cpp
   ${PROJECT_SOURCE_DIR}/src/KalmanFilter.cpp
+  ${PROJECT_SOURCE_DIR}/src/FeatureProvider.cpp
+  ${PROJECT_SOURCE_DIR}/src/LBPFeatureExtractor.cpp
   ${PROJECT_SOURCE_DIR}/src/lapjv.cpp
   ${PROJECT_SOURCE_DIR}/src/Object.cpp
   ${PROJECT_SOURCE_DIR}/src/Rect.cpp
