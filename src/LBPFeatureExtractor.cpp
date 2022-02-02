@@ -35,19 +35,19 @@ void byte_track::LBPFeatureExtractor::calcLBP(const cv::Mat &src, cv::Mat &dst)
         const auto src_b_ptr = src.ptr<unsigned char>(std::min(src.rows - 1, ri + 1));
         for (int ci = 0; ci < src.cols; ci++)
         {
-            const auto &centor = src_m_ptr[ci];
+            const auto &center = src_m_ptr[ci];
             const auto l_idx = std::max(0, ci - 1);
             const auto m_idx = ci;
             const auto r_idx = std::min(src.cols - 1, ci + 1);
             dst_ptr[ci] = 0;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_t_ptr[m_idx]) << 7;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_t_ptr[l_idx]) << 6;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_m_ptr[l_idx]) << 5;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_b_ptr[l_idx]) << 4;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_b_ptr[m_idx]) << 3;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_b_ptr[r_idx]) << 2;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_m_ptr[r_idx]) << 1;
-            dst_ptr[ci] |= static_cast<unsigned char>(centor <= src_t_ptr[r_idx]) << 0;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_t_ptr[m_idx]) << 7;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_t_ptr[l_idx]) << 6;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_m_ptr[l_idx]) << 5;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_b_ptr[l_idx]) << 4;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_b_ptr[m_idx]) << 3;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_b_ptr[r_idx]) << 2;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_m_ptr[r_idx]) << 1;
+            dst_ptr[ci] |= static_cast<unsigned char>(center <= src_t_ptr[r_idx]) << 0;
         }
     }
 }
