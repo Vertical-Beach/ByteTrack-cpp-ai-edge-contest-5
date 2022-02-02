@@ -76,7 +76,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<std::vector<int>> matches_idx;
         std::vector<int> unmatch_detection_idx, unmatch_track_idx;
 
-        const auto dists = calcIouDistance(strack_pool, det_stracks);
+        const auto dists = calcIoUCostMatrix(strack_pool, det_stracks);
         linearAssignment(dists, strack_pool.size(), det_stracks.size(), match_thresh_,
                          matches_idx, unmatch_track_idx, unmatch_detection_idx);
 
@@ -117,7 +117,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<std::vector<int>> matches_idx;
         std::vector<int> unmatch_track_idx, unmatch_detection_idx;
 
-        const auto dists = calcIouDistance(remain_tracked_stracks, det_low_stracks);
+        const auto dists = calcIoUCostMatrix(remain_tracked_stracks, det_low_stracks);
         linearAssignment(dists, remain_tracked_stracks.size(), det_low_stracks.size(), 0.5,
                          matches_idx, unmatch_track_idx, unmatch_detection_idx);
 
@@ -157,7 +157,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<std::vector<int>> matches_idx;
 
         // Deal with unconfirmed tracks, usually tracks with only one beginning frame
-        const auto dists = calcIouDistance(non_active_stracks, remain_det_stracks);
+        const auto dists = calcIoUCostMatrix(non_active_stracks, remain_det_stracks);
         linearAssignment(dists, non_active_stracks.size(), remain_det_stracks.size(), 0.7,
                          matches_idx, unmatch_unconfirmed_idx, unmatch_detection_idx);
 
@@ -273,7 +273,7 @@ void byte_track::BYTETracker::removeDuplicateStracks(const std::vector<STrackPtr
                                                      std::vector<STrackPtr> &a_res,
                                                      std::vector<STrackPtr> &b_res) const
 {
-    const auto ious = calcIouDistance(a_stracks, b_stracks);
+    const auto ious = calcIoUCostMatrix(a_stracks, b_stracks);
 
     std::vector<std::pair<size_t, size_t>> overlapping_combinations;
     for (size_t i = 0; i < ious.size(); i++)
@@ -391,8 +391,8 @@ std::vector<std::vector<float>> byte_track::BYTETracker::calcIous(const std::vec
     return ious;
 }
 
-std::vector<std::vector<float> > byte_track::BYTETracker::calcIouDistance(const std::vector<STrackPtr> &a_tracks,
-                                                                          const std::vector<STrackPtr> &b_tracks) const
+std::vector<std::vector<float> > byte_track::BYTETracker::calcIoUCostMatrix(const std::vector<STrackPtr> &a_tracks,
+                                                                            const std::vector<STrackPtr> &b_tracks) const
 {
     std::vector<byte_track::Rect<float>> a_rects, b_rects;
     for (size_t i = 0; i < a_tracks.size(); i++)
