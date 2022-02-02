@@ -1,11 +1,12 @@
 #include <ByteTrack/STrack.h>
 
-byte_track::STrack::STrack(const Rect<float>& rect, const float& score) :
+byte_track::STrack::STrack(const Rect<float>& rect, const float& score, const FeatureProviderPtr &fp_ptr) :
     kalman_filter_(),
     mean_(),
     covariance_(),
     rect_(rect),
     state_(STrackState::New),
+    fp_ptr_(fp_ptr),
     is_activated_(false),
     score_(score),
     track_id_(0),
@@ -27,6 +28,11 @@ const byte_track::Rect<float>& byte_track::STrack::getRect() const
 const byte_track::STrackState& byte_track::STrack::getSTrackState() const
 {
     return state_;
+}
+
+const std::vector<float>& byte_track::STrack::getLBPFeature() const
+{
+    return lbp_feature_;
 }
 
 const bool& byte_track::STrack::isActivated() const
@@ -130,4 +136,6 @@ void byte_track::STrack::updateRect()
     rect_.height() = mean_[3];
     rect_.x() = mean_[0] - rect_.width() / 2;
     rect_.y() = mean_[1] - rect_.height() / 2;
+
+    lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
 }

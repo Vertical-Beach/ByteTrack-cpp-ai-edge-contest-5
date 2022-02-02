@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 
+#include <ByteTrack/FeatureProvider.h>
 #include <ByteTrack/STrack.h>
 #include <ByteTrack/lapjv.h>
 #include <ByteTrack/Object.h>
@@ -21,7 +22,7 @@ public:
                 const float& match_thresh = 0.8);
     ~BYTETracker();
 
-    std::vector<STrackPtr> update(const std::vector<Object>& objects);
+    std::vector<STrackPtr> update(const std::vector<Object> &objects, const FeatureProvider &fp);
 
 private:
     std::vector<STrackPtr> jointStracks(const std::vector<STrackPtr> &a_tlist,

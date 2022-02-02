@@ -18,7 +18,7 @@ byte_track::BYTETracker::~BYTETracker()
 {
 }
 
-std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(const std::vector<Object>& objects)
+std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(const std::vector<Object>& objects, const FeatureProvider &fp)
 {
     ////////////////// Step 1: Get detections //////////////////
     frame_id_++;
@@ -27,9 +27,10 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     std::vector<STrackPtr> det_stracks;
     std::vector<STrackPtr> det_low_stracks;
 
+    const auto fp_ptr = std::make_shared<FeatureProvider>(fp);
     for (const auto &object : objects)
     {
-        const auto strack = std::make_shared<STrack>(object.rect, object.prob);
+        const auto strack = std::make_shared<STrack>(object.rect, object.prob, fp_ptr);
         if (object.prob >= track_thresh_)
         {
             det_stracks.push_back(strack);

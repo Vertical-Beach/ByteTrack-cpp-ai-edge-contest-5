@@ -191,8 +191,10 @@ int main(int argc, char *argv[])
                         outputs.back().push_back(*tracker_output.get());
                     }
                 };
-                copy(car_tracker.update(inputs_car[fi]), outputs_car);
-                copy(pedestrian_tracker.update(inputs_pedestrian[fi]), outputs_pedestrian);
+
+                byte_track::FeatureProvider fp(images[fi]);
+                copy(car_tracker.update(inputs_car[fi], fp), outputs_car);
+                copy(pedestrian_tracker.update(inputs_pedestrian[fi], fp), outputs_pedestrian);
             }
 
             // Results: vector of vector{track_id, rect}, and the idx means frame_id
