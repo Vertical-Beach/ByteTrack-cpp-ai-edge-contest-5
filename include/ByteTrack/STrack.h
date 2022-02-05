@@ -27,6 +27,12 @@ public:
     const STrackState& getSTrackState() const;
 
     const std::vector<float>& getLBPFeature() const;
+    const std::vector<float>& getHueFeature() const;
+    const std::vector<float>& getSaturationFeature() const;
+
+    const FeatureProviderPtr& getFeatureProviderPtr() const;
+
+    void setFeatureProviderPtr(const FeatureProviderPtr& fp_ptr);
 
     const bool& isActivated() const;
     const float& getScore() const;
@@ -54,6 +60,8 @@ private:
 
     FeatureProviderPtr fp_ptr_;
     std::vector<float> lbp_feature_;
+    std::vector<float> hue_feature_;
+    std::vector<float> saturation_feature_;
 
     bool is_activated_;
     float score_;

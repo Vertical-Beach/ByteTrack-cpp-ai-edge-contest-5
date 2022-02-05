@@ -14,6 +14,10 @@ byte_track::STrack::STrack(const Rect<float>& rect, const float& score, const Fe
     start_frame_id_(0),
     tracklet_len_(0)
 {
+    lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
+    const auto [hue_feature, saturation_feature] = fp_ptr_->getColorFeature(rect_);
+    hue_feature_ = std::move(hue_feature);
+    saturation_feature_ = std::move(saturation_feature);
 }
 
 byte_track::STrack::~STrack()
@@ -33,6 +37,26 @@ const byte_track::STrackState& byte_track::STrack::getSTrackState() const
 const std::vector<float>& byte_track::STrack::getLBPFeature() const
 {
     return lbp_feature_;
+}
+
+const std::vector<float>& byte_track::STrack::getHueFeature() const
+{
+    return hue_feature_;
+}
+
+const std::vector<float>& byte_track::STrack::getSaturationFeature() const
+{
+    return saturation_feature_;
+}
+
+const byte_track::STrack::FeatureProviderPtr& byte_track::STrack::getFeatureProviderPtr() const
+{
+    return fp_ptr_;
+}
+
+void byte_track::STrack::setFeatureProviderPtr(const FeatureProviderPtr& fp_ptr)
+{
+    fp_ptr_ = fp_ptr;
 }
 
 const bool& byte_track::STrack::isActivated() const
@@ -140,4 +164,7 @@ void byte_track::STrack::updateRect()
     rect_.y() = mean_[1] - rect_.height() / 2;
 
     lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
+    const auto [hue_feature, saturation_feature] = fp_ptr_->getColorFeature(rect_);
+    hue_feature_ = std::move(hue_feature);
+    saturation_feature_ = std::move(saturation_feature);
 }
