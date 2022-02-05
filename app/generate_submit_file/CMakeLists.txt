@@ -46,6 +46,7 @@ link_directories(
 
 add_executable(${PROJECT_NAME}
   ${PROJECT_SOURCE_DIR}/main.cpp
+  ${PROJECT_SOURCE_DIR}/json11/json11.cpp
   )
 
 target_link_libraries(${PROJECT_NAME}
