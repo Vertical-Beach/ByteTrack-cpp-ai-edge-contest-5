@@ -99,6 +99,8 @@ void byte_track::STrack::predict()
         mean_[7] = 0;
     }
     kalman_filter_.predict(mean_, covariance_);
+
+    updateRect();
 }
 
 void byte_track::STrack::update(const STrack &new_track, const size_t &frame_id)
