@@ -2,10 +2,7 @@
 
 #include <opencv2/opencv.hpp>
 
-#include <boost/property_tree/ptree.hpp>
-#include <boost/property_tree/json_parser.hpp>
-#include <boost/foreach.hpp>
-#include <boost/optional.hpp>
+#include "json11/json11.hpp"
 
 #include <filesystem>
 #include <regex>
@@ -22,7 +19,7 @@ namespace
             throw std::runtime_error("Could not open the video file: " + path.string());
         }
         const auto fps = video.get(cv::CAP_PROP_FPS);
-        
+
         std::vector<cv::Mat> images;
         while (true)
         {
@@ -51,37 +48,21 @@ namespace
         }
     }
 
-    template <typename T>
-    T get_data(const boost::property_tree::ptree &pt, const std::string &key)
-    {
-        T ret;
-        if (boost::optional<T> data = pt.get_optional<T>(key))
-        {
-            ret = data.get();
-        }
-        else
-        {
-            throw std::runtime_error("Could not read the data from ptree: [key: " + key + "]");
-        }
-        return ret;
-    }
-
-    std::vector<std::vector<byte_track::Object>> get_inputs(const boost::property_tree::ptree &pt,
+    std::vector<std::vector<byte_track::Object>> get_inputs(const json11::Json jobj,
                                                             const size_t &total_frame,
                                                             const int &im_width,
                                                             const int &im_height)
     {
         std::vector<std::vector<byte_track::Object>> inputs_ref;
         inputs_ref.resize(total_frame);
-        BOOST_FOREACH (const boost::property_tree::ptree::value_type &child, pt.get_child("results"))
+        for(auto result: jobj["results"].array_items())
         {
-            const boost::property_tree::ptree &result = child.second;
-            const auto frame_id = get_data<int>(result, "frame_id");
-            const auto prob = get_data<float>(result, "prob");
-            const auto x = std::clamp(get_data<float>(result, "x"), 0.F, im_width - 1.F);
-            const auto y = std::clamp(get_data<float>(result, "y"), 0.F, im_height - 1.F);
-            const auto width = std::clamp(get_data<float>(result, "width"), 0.F, im_width - x);
-            const auto height = std::clamp(get_data<float>(result, "height"), 0.F, im_height - y);
+            const auto frame_id = stoi(result["frame_id"].string_value());
+            const auto prob = stof(result["prob"].string_value());
+            const auto x = std::clamp(stof(result["x"].string_value()), 0.F, im_width - 1.F);
+            const auto y = std::clamp(stof(result["y"].string_value()), 0.F, im_height - 1.F);
+            const auto width = std::clamp(stof(result["width"].string_value()), 0.F, im_width - x);
+            const auto height = std::clamp(stof(result["height"].string_value()), 0.F, im_height - y);
             inputs_ref[frame_id].emplace_back(byte_track::Rect(x, y, width, height), 0, prob);
         }
         return inputs_ref;
@@ -134,31 +115,38 @@ int main(int argc, char *argv[])
         std::sort(detection_results_path.begin(), detection_results_path.end());
         std::sort(videos_path.begin(), videos_path.end());
 
-        boost::property_tree::ptree submit_pt;
+        //key: video_name
+        //value: tracked object dict list
+        std::map<std::string, json11::Json> frame_objects_map;
         auto detection_results_filename_itr = detection_results_path.begin();
         for (const auto &video_path : videos_path)
         {
             std::cout << video_path.filename() << std::endl;
             const std::string video_basename = video_path.stem();
-            const auto read_json = [&](decltype(detection_results_path)::iterator &itr, boost::property_tree::ptree &pt) -> bool
+            const auto read_json = [&](decltype(detection_results_path)::iterator &itr, json11::Json &jobj) -> bool
             {
                 const auto &path = *itr;
                 const std::string basename = path.stem();
                 const auto prefix_is_same = (video_basename.size() <= basename.size() && std::equal(video_basename.begin(), video_basename.end(), basename.begin()));
                 if (prefix_is_same)
                 {
-                    boost::property_tree::read_json(path.string(), pt);
+                    // boost::property_tree::read_json(path.string(), pt);
+                    std::ifstream ifs(path.string());
+                    std::string jsonstr((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+                    std::string err;
+                    jobj = json11::Json::parse(jsonstr, err);
+                    ifs.close();
                     itr++;
                 }
                 return prefix_is_same;
             };
 
-            boost::property_tree::ptree pt_results_car, pt_results_pedestrian;
-            if (!read_json(detection_results_filename_itr, pt_results_car))
+            json11::Json jobj_car, jobj_pedestrian;
+            if (!read_json(detection_results_filename_itr, jobj_car))
             {
                 continue;
             }
-            if (!read_json(detection_results_filename_itr, pt_results_pedestrian))
+            if (!read_json(detection_results_filename_itr, jobj_pedestrian))
             {
                 break;
             }
@@ -169,8 +157,8 @@ int main(int argc, char *argv[])
             const auto height = images[0].size().height;
 
             // Get detection results
-            const auto inputs_car = get_inputs(pt_results_car, images.size(), width, height);
-            const auto inputs_pedestrian = get_inputs(pt_results_pedestrian, images.size(), width, height);
+            const auto inputs_car = get_inputs(jobj_car, images.size(), width, height);
+            const auto inputs_pedestrian = get_inputs(jobj_pedestrian, images.size(), width, height);
 
             // Execute tracking
             byte_track::BYTETracker car_tracker(fps, fps);
@@ -239,50 +227,35 @@ int main(int argc, char *argv[])
             auto results_pedestrian = validate_outputs(outputs_pedestrian);
 
             // Generate submit file
-            boost::property_tree::ptree frames_pt;
+            std::vector<json11::Json> frame_objects;
             for (size_t fi = 0; fi < images.size(); fi++)
             {
-                boost::property_tree::ptree frame_pt;
+                //key: category
+                //value: lists of tracked objects
+                std::map<std::string, std::vector<json11::Json>> objs_for_category_map;
                 const auto gen_objs_pt_and_draw_rect = [&](Results &results,
                                                            const std::string &name) -> void
                 {
-                    const auto get_obj_pt = [](boost::property_tree::ptree &pt,
-                                               const cv::Rect2i &rect,
-                                               const size_t &track_id) -> void
-                    {
-                        boost::property_tree::ptree box2d_pt, tl_x_pt, tl_y_pt, br_x_pt, br_y_pt;
-                        tl_x_pt.put_value(rect.tl().x);
-                        tl_y_pt.put_value(rect.tl().y);
-                        br_x_pt.put_value(rect.br().x);
-                        br_y_pt.put_value(rect.br().y);
-                        box2d_pt.push_back({"", tl_x_pt});
-                        box2d_pt.push_back({"", tl_y_pt});
-                        box2d_pt.push_back({"", br_x_pt});
-                        box2d_pt.push_back({"", br_y_pt});
-                        pt.put("id", track_id);
-                        pt.add_child("box2d", box2d_pt);
-                    };
-
-                    boost::property_tree::ptree objs_pt;
+                    std::vector<json11::Json> objs_jobj;
                     for (const auto &[track_id, rect] : results[fi])
                     {
-                        boost::property_tree::ptree obj_pt;
-                        get_obj_pt(obj_pt, rect, track_id);
-                        objs_pt.push_back({"", obj_pt});
+                        auto jobj = json11::Json::object();
+                        jobj["id"] = (int)track_id;
+                        jobj["box2d"] = json11::Json::array({rect.tl().x, rect.tl().y, rect.br().x, rect.br().y});
+                        objs_jobj.push_back(jobj);
                         draw_rect(draw_images[fi], rect, track_id, name.substr(0, 1));
                     }
-                    if (objs_pt.size() != 0)
+                    if (objs_jobj.size() != 0)
                     {
-                        frame_pt.add_child(name, objs_pt);
+                        objs_for_category_map[name] = objs_jobj;
                     }
                 };
 
                 gen_objs_pt_and_draw_rect(results_car, "Car");
                 gen_objs_pt_and_draw_rect(results_pedestrian, "Pedestrian");
-                frames_pt.push_back({"", frame_pt});
+                frame_objects.push_back(json11::Json(objs_for_category_map));
             }
-
-            submit_pt.add_child(boost::property_tree::path(video_path.filename().string(), '\0'), frames_pt);
+            frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
 
             // Write video with tracking result
             write_video(draw_images, video_path.filename(), fps);
@@ -294,15 +267,11 @@ int main(int argc, char *argv[])
         }
 
         // Write submit file
-        std::ostringstream oss;
-        boost::property_tree::write_json(oss, submit_pt);
-
-        std::regex reg1("\\\"([0-9]+\\.{0,1}[0-9]*)\\\"");
-        std::regex reg2("\\\"\\\"");
         std::ofstream file;
         file.open("predictions.json");
-        file << std::regex_replace(std::regex_replace(oss.str(), reg1, "$1"), reg2, "{}");
+        file << json11::Json(frame_objects_map).dump();
         file.close();
+
     }
     catch (const std::exception &e)
     {
