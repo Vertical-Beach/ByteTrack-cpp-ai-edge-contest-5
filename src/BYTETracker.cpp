@@ -61,8 +61,10 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     strack_pool = jointStracks(active_stracks, lost_stracks_);
 
     // Predict current pose by KF
+    std::vector<STrack> strack_pool_prev;
     for (auto &strack : strack_pool)
     {
+        strack_pool_prev.push_back(*strack);
         strack->predict();
     }
 
@@ -76,7 +78,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<std::vector<int>> matches_idx;
         std::vector<int> unmatch_detection_idx, unmatch_track_idx;
 
-        const auto dists = calcIoUCostMatrix(strack_pool, det_stracks);
+        const auto dists = calcFirstCostMatrix(strack_pool, strack_pool_prev, det_stracks);
         linearAssignment(dists, strack_pool.size(), det_stracks.size(), match_thresh_,
                          matches_idx, unmatch_track_idx, unmatch_detection_idx);
 
@@ -117,7 +119,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<std::vector<int>> matches_idx;
         std::vector<int> unmatch_track_idx, unmatch_detection_idx;
 
-        const auto dists = calcIoUCostMatrix(remain_tracked_stracks, det_low_stracks);
+        const auto dists = calcSecondCostMatrix(remain_tracked_stracks, det_low_stracks);
         linearAssignment(dists, remain_tracked_stracks.size(), det_low_stracks.size(), 0.5,
                          matches_idx, unmatch_track_idx, unmatch_detection_idx);
 
@@ -317,6 +319,46 @@ void byte_track::BYTETracker::removeDuplicateStracks(const std::vector<STrackPtr
             b_res.push_back(b_stracks[bi]);
         }
     }
+}
+
+std::vector<std::vector<float>> byte_track::BYTETracker::calcFirstCostMatrix(const std::vector<STrackPtr> &a_tracks,
+                                                                             const std::vector<STrack> &a_tracks_prev,
+                                                                             const std::vector<STrackPtr> &b_tracks) const
+{
+    if (a_tracks.size() != a_tracks_prev.size())
+    {
+        throw std::runtime_error("The size of a_tracks and a_tracks_prev are different in BYTETracker::calcFirstCostMatrix()");
+    }
+
+    if (a_tracks.size() == 0 || b_tracks.size() == 0)
+    {
+        return std::vector<std::vector<float>>();
+    }
+
+    const auto ious = calcIoUCostMatrix(a_tracks, b_tracks);
+
+    std::vector<std::vector<float>> cost_matrix(a_tracks.size(), std::vector<float>(b_tracks.size()));
+    for (size_t ai = 0; ai < a_tracks.size(); ai++)
+    {
+        for (size_t bi = 0; bi < b_tracks.size(); bi++)
+        {
+            cost_matrix[ai][bi] = ious[ai][bi];
+        }
+    }
+    return cost_matrix;
+}
+
+std::vector<std::vector<float>> byte_track::BYTETracker::calcSecondCostMatrix(const std::vector<STrackPtr> &a_tracks,
+                                                                              const std::vector<STrackPtr> &b_tracks) const
+{
+    if (a_tracks.size() == 0 || b_tracks.size() == 0)
+    {
+        return std::vector<std::vector<float>>();
+    }
+
+    const auto cost_matrix = calcIoUCostMatrix(a_tracks, b_tracks);
+
+    return cost_matrix;
 }
 
 void byte_track::BYTETracker::linearAssignment(const std::vector<std::vector<float>> &cost_matrix,

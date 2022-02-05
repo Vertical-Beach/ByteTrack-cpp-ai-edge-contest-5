@@ -36,6 +36,13 @@ private:
                                 std::vector<STrackPtr> &a_res,
                                 std::vector<STrackPtr> &b_res) const;
 
+    std::vector<std::vector<float>> calcFirstCostMatrix(const std::vector<STrackPtr> &a_tracks,
+                                                        const std::vector<STrack> &a_tracks_prev,
+                                                        const std::vector<STrackPtr> &b_tracks) const;
+
+    std::vector<std::vector<float>> calcSecondCostMatrix(const std::vector<STrackPtr> &a_tracks,
+                                                         const std::vector<STrackPtr> &b_tracks) const;
+
     void linearAssignment(const std::vector<std::vector<float>> &cost_matrix,
                           const int &cost_matrix_size,
                           const int &cost_matrix_size_size,
