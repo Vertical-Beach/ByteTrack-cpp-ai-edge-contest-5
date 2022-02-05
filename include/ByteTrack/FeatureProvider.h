@@ -10,6 +10,7 @@ namespace byte_track
 
 struct FeatureProviderCfg
 {
+    float scale {1.0};
     LBPFeatureExtractor::Type lbp_type {LBPFeatureExtractor::Type::NORMAL};
     int n_lbp_feature_hist_bins {10};
 };
@@ -20,11 +21,10 @@ public:
     using Cfg = FeatureProviderCfg;
 
     explicit FeatureProvider(const cv::Mat &image,
-                             const Cfg &cfg = Cfg(),
-                             const bool &clone = false);
+                             const Cfg &cfg = Cfg());
     ~FeatureProvider();
 
-    void setImage(const cv::Mat &image, const bool &clone = false);
+    void setImage(const cv::Mat &image);
 
     std::vector<float> getLbpFeature(const byte_track::Rect<float> &rect) const;
 

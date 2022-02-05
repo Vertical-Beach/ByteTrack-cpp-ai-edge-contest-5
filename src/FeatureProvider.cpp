@@ -1,31 +1,29 @@
 #include <ByteTrack/FeatureProvider.h>
 
 byte_track::FeatureProvider::FeatureProvider(const cv::Mat &image,
-                                             const Cfg &cfg,
-                                             const bool &clone) :
-    cfg_(cfg),
-    image_(clone ? image.clone() : image)
+                                             const Cfg &cfg) :
+    cfg_(cfg)
 {
-    preproc();
+    setImage(image);
 }
 
 byte_track::FeatureProvider::~FeatureProvider()
 {
 }
 
-void byte_track::FeatureProvider::setImage(const cv::Mat &image, const bool &clone)
+void byte_track::FeatureProvider::setImage(const cv::Mat &image)
 {
-    image_ = clone ? image.clone() : image;
+    cv::resize(image, image_, cv::Size(image.cols * cfg_.scale, image.rows * cfg_.scale), 0, 0, cv::INTER_LINEAR);
     preproc();
 }
 
 std::vector<float> byte_track::FeatureProvider::getLbpFeature(const byte_track::Rect<float> &rect) const
 {
     cv::Rect2i rect2i;
-    rect2i.x = std::clamp(static_cast<int>(std::round(rect.x())), 0, image_.size().width - 1);
-    rect2i.y = std::clamp(static_cast<int>(std::round(rect.y())), 0, image_.size().height - 1);
-    rect2i.width = std::clamp(static_cast<int>(std::round(rect.width())), 0, image_.size().width - rect2i.x);
-    rect2i.height = std::clamp(static_cast<int>(std::round(rect.height())), 0, image_.size().height - rect2i.y);
+    rect2i.x = std::clamp(static_cast<int>(std::round(rect.x() * cfg_.scale)), 0, image_.size().width - 1);
+    rect2i.y = std::clamp(static_cast<int>(std::round(rect.y() * cfg_.scale)), 0, image_.size().height - 1);
+    rect2i.width = std::clamp(static_cast<int>(std::round(rect.width() * cfg_.scale)), 0, image_.size().width - rect2i.x);
+    rect2i.height = std::clamp(static_cast<int>(std::round(rect.height() * cfg_.scale)), 0, image_.size().height - rect2i.y);
 
     const cv::Mat rected_lbp_mat = lbp_mat_(rect2i);
     const float range[] = {0, static_cast<float>(cfg_.n_lbp_feature_hist_bins)};
