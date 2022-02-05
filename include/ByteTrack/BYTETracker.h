@@ -51,6 +51,11 @@ private:
                           std::vector<int> &b_unmatched,
                           std::vector<int> &a_unmatched) const;
 
+    std::vector<std::vector<float>> calcLBPCostMatrix(const std::vector<STrack> &a_tracks,
+                                                      const std::vector<STrackPtr> &b_tracks) const;
+
+    float calcCosSimilarity(const std::vector<float> &a, const std::vector<float> &b) const;
+
     std::vector<std::vector<float>> calcIoUCostMatrix(const std::vector<STrackPtr> &a_tracks,
                                                       const std::vector<STrackPtr> &b_tracks) const;
 

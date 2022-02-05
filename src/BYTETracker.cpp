@@ -409,6 +409,120 @@ void byte_track::BYTETracker::linearAssignment(const std::vector<std::vector<flo
     }
 }
 
+float byte_track::BYTETracker::calcCosSimilarity(const std::vector<float> &a, const std::vector<float> &b) const
+{
+    if (a.size() != b.size())
+    {
+        throw std::runtime_error("The size of vectors are different in byte_track::BYTETracker::calcCosSimilarity(): a.size()" + 
+                                 std::to_string(a.size()) + ", b.size(): " + std::to_string(b.size()));
+    }
+
+    float ab = 0;
+    float a_sq = 0;
+    float b_sq = 0;
+    for (size_t i = 0; i < a.size(); i++)
+    {
+        ab += a[i] * b[i];
+        a_sq += a[i] * a[i];
+        b_sq += b[i] * b[i];
+    }
+    return ab / (std::sqrt(a_sq) * std::sqrt(b_sq));
+}
+
+std::vector<std::vector<float>> byte_track::BYTETracker::calcLBPCostMatrix(const std::vector<STrack> &a_tracks,
+                                                                           const std::vector<STrackPtr> &b_tracks) const
+{
+    std::vector<std::vector<float>> cost_matrix;
+    for (const auto &a_track : a_tracks)
+    {
+        std::vector<float> lbp_dist;
+        const auto &a_feature = a_track.getLBPFeature();
+        /*
+        const auto &a_feature_hue = a_track.getHueFeature();
+        const auto &a_feature_saturation = a_track.getSaturationFeature();
+        const auto &a_rect_prev = a_track.getRect();
+        */
+
+        for (const auto &b_track : b_tracks)
+        {
+            const auto &b_feature = b_track->getLBPFeature();
+            const auto simirality = calcCosSimilarity(a_feature, b_feature);
+
+            /*
+            const auto &b_feature_hue = b_track->getHueFeature();
+            const auto &b_feature_saturation = b_track->getSaturationFeature();
+            const auto simirality_hue = calcCosSimilarity(a_feature_hue, b_feature_hue);
+            const auto simirality_saturation = calcCosSimilarity(a_feature_saturation, b_feature_saturation);
+
+            std::cout << "a_feature: ";
+            for (const auto &v : a_feature)
+            {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+
+            std::cout << "b_feature: ";
+            for (const auto &v : b_feature)
+            {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+
+            std::cout << "simirality: " << simirality << std::endl;
+
+            std::cout << "a_feature_hue: ";
+            for (const auto &v : a_feature_hue)
+            {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+
+            std::cout << "b_feature_hue: ";
+            for (const auto &v : b_feature_hue)
+            {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+
+            std::cout << "simirality_hue: " << simirality_hue << std::endl;
+
+            std::cout << "a_feature_saturation: ";
+            for (const auto &v : a_feature_saturation)
+            {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+
+            std::cout << "b_feature_saturation: ";
+            for (const auto &v : b_feature_saturation)
+            {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+
+            std::cout << "simirality_saturation: " << simirality_saturation << std::endl;
+
+            const auto draw_rect = [](cv::Mat &image, const cv::Rect2i &rect, const cv::Scalar &color, const std::string &label)
+            {
+                cv::rectangle(image, rect.tl(), rect.br(), color, 5);
+                cv::putText(image, label, cv::Point(rect.tl().x, rect.tl().y - 10), cv::FONT_HERSHEY_PLAIN, 1, color, 1, cv::LINE_AA);
+            };
+            const auto &b_rect = b_track->getRect();
+            const auto &fp_ptr = b_track->getFeatureProviderPtr();
+            cv::Mat scaled_image = fp_ptr->getScaledImage().clone();
+            draw_rect(scaled_image, fp_ptr->rect2ScaledRect2i(a_rect_prev), cv::Scalar(0, 255, 0), "Base");
+            draw_rect(scaled_image, fp_ptr->rect2ScaledRect2i(b_rect), cv::Scalar(0, 0, 255), "Detection");
+            cv::imshow("scaled_image", scaled_image);
+            cv::waitKey(0);
+            */
+
+            lbp_dist.push_back(1 - simirality);
+        }
+        cost_matrix.push_back(std::move(lbp_dist));
+    }
+    return cost_matrix;
+}
+
 std::vector<std::vector<float>> byte_track::BYTETracker::calcIous(const std::vector<Rect<float>> &a_rect,
                                                                   const std::vector<Rect<float>> &b_rect) const
 {
