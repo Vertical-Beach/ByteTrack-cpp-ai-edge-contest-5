@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
         std::vector<std::filesystem::path> videos_path;
         for (const auto &file : std::filesystem::directory_iterator(argv[2]))
         {
-            if (file.path().extension() == ".mp4")
+            if (file.path().extension() == ".avi")
             {
                 videos_path.push_back(file);
             }
