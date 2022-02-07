@@ -26,6 +26,13 @@ if(NOT EIGEN3_FOUND)
   message(FATAL_ERROR "Eigen > 3.3.0 not found.")
 endif()
 
+set(RISCV OFF CACHE BOOL "The flag whether to use riscv or not")
+if(RISCV)
+  add_definitions(-DRISCV)
+  add_definitions(-Wno-unused-result)
+  message(STATUS "Use RISCV")
+endif()
+
 include_directories(
   ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}

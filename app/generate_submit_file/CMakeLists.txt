@@ -44,6 +44,12 @@ link_directories(
     ${BYTETRACK_DIR}/build
     )
 
+set(RISCV OFF CACHE BOOL "The flag whether to use riscv or not")
+if(RISCV)
+  message("Use RISCV")
+  add_definitions(-DRISCV)
+endif()
+
 add_executable(${PROJECT_NAME}
   ${PROJECT_SOURCE_DIR}/main.cpp
   ${PROJECT_SOURCE_DIR}/json11/json11.cpp

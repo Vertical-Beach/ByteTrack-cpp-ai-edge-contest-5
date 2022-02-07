@@ -8,5 +8,9 @@
 
 namespace byte_track
 {
+#ifndef RISCV
 int lapjv_internal(const size_t n, double *cost[], int *x, int *y);
+#else
+int lapjv_internal(const size_t n, double *cost[], int *x, int *y, int* riscv_dmem_base);
+#endif
 }

@@ -85,6 +85,12 @@ namespace
     }
 }
 
+#ifdef RISCV
+#include <sys/mman.h>
+#include <fcntl.h>
+#include "riscv_imm.h"
+#endif
+
 int main(int argc, char *argv[])
 {
     try
@@ -160,10 +166,25 @@ int main(int argc, char *argv[])
             const auto inputs_car = get_inputs(jobj_car, images.size(), width, height);
             const auto inputs_pedestrian = get_inputs(jobj_pedestrian, images.size(), width, height);
 
+            #ifdef RISCV
+            int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
+            int* riscv_dmem_base = (int*) mmap(NULL, 0x20000, PROT_READ|PROT_WRITE, MAP_SHARED, uio0_fd, 0);
+            int uio1_fd = open("/dev/uio1", O_RDWR | O_SYNC);
+            unsigned int* riscv_imem_base = (unsigned int*) mmap(NULL, 0x10000, PROT_READ|PROT_WRITE, MAP_SHARED, uio1_fd, 0);
+            if(uio0_fd < 0 || uio1_fd < 0){
+                std::cerr << "Device Open Failed" << std::endl;
+                return -1;
+            }
+            //write instruction
+            riscv_imm(riscv_imem_base);
+
+            byte_track::BYTETracker car_tracker(fps, fps, riscv_dmem_base);
+            byte_track::BYTETracker pedestrian_tracker(fps, fps, riscv_dmem_base);
+            #else
             // Execute tracking
             byte_track::BYTETracker car_tracker(fps, fps);
             byte_track::BYTETracker pedestrian_tracker(fps, fps);
-
+            #endif
             std::vector<cv::Mat> draw_images;
             std::vector<std::vector<byte_track::STrack>> outputs_car;
             std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;

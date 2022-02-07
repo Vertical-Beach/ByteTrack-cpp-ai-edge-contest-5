@@ -1,18 +1,36 @@
 #include <ByteTrack/BYTETracker.h>
 
+#ifdef RISCV
 byte_track::BYTETracker::BYTETracker(const int& frame_rate,
                                      const int& track_buffer,
+                                     int* riscv_dmem_base,
                                      const float& track_thresh,
                                      const float& high_thresh,
-                                     const float& match_thresh) :
+                                     const float& match_thresh):
     track_thresh_(track_thresh),
     high_thresh_(high_thresh),
     match_thresh_(match_thresh),
     max_time_lost_(static_cast<size_t>(frame_rate / 30.0 * track_buffer)),
     frame_id_(0),
-    track_id_count_(0)
+    track_id_count_(0),
+    riscv_dmem_base(riscv_dmem_base)
 {
 }
+#else
+byte_track::BYTETracker::BYTETracker(const int& frame_rate,
+                                     const int& track_buffer,
+                                     const float& track_thresh,
+                                     const float& high_thresh,
+                                     const float& match_thresh):
+    track_thresh_(track_thresh),
+    high_thresh_(high_thresh),
+    match_thresh_(match_thresh),
+    max_time_lost_(static_cast<size_t>(frame_rate / 30.0 * track_buffer)),
+    frame_id_(0),
+    track_id_count_(0),
+{
+}
+#endif
 
 byte_track::BYTETracker::~BYTETracker()
 {
@@ -522,7 +540,12 @@ double byte_track::BYTETracker::execLapjv(const std::vector<std::vector<float>> 
     int* x_c = new int[sizeof(int) * n];
     int *y_c = new int[sizeof(int) * n];
 
-    int ret = lapjv_internal(n, cost_ptr, x_c, y_c);
+    int ret;
+    #ifdef RISCV
+    ret = lapjv_internal(n, cost_ptr, x_c, y_c, riscv_dmem_base);
+    #else
+    ret = lapjv_internal(n, cost_ptr, x_c, y_c);
+    #endif
     if (ret != 0)
     {
         throw std::runtime_error("The result of lapjv_internal() is invalid.");
