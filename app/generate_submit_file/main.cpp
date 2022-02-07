@@ -185,12 +185,12 @@ int main(int argc, char *argv[])
             byte_track::BYTETracker car_tracker(fps, fps);
             byte_track::BYTETracker pedestrian_tracker(fps, fps);
             #endif
-            std::vector<cv::Mat> draw_images;
+            // std::vector<cv::Mat> draw_images;
             std::vector<std::vector<byte_track::STrack>> outputs_car;
             std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
             for (size_t fi = 0; fi < images.size(); fi++)
             {
-                draw_images.push_back(images[fi].clone());
+                // draw_images.push_back(images[fi].clone());
                 const auto copy = [](const auto tracker_outputs, auto &outputs) -> void
                 {
                     outputs.emplace_back();
@@ -229,7 +229,7 @@ int main(int argc, char *argv[])
                 }
 
                 // Validate
-                Results result(draw_images.size());
+                Results result(images.size());
                 for (const auto &[track_id, stracks] : map)
                 {
                     if (stracks.size() < 3)
@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
                         jobj["id"] = (int)track_id;
                         jobj["box2d"] = json11::Json::array({rect.tl().x, rect.tl().y, rect.br().x, rect.br().y});
                         objs_jobj.push_back(jobj);
-                        draw_rect(draw_images[fi], rect, track_id, name.substr(0, 1));
+                        // draw_rect(draw_images[fi], rect, track_id, name.substr(0, 1));
                     }
                     if (objs_jobj.size() != 0)
                     {
@@ -279,7 +279,7 @@ int main(int argc, char *argv[])
             frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
 
             // Write video with tracking result
-            write_video(draw_images, video_path.filename(), fps);
+            // write_video(draw_images, video_path.filename(), fps);
 
             if (detection_results_filename_itr == detection_results_path.end())
             {
