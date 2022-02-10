@@ -9,8 +9,8 @@
 
 namespace
 {
-    // return [images, fps]
-    std::pair<std::vector<cv::Mat>, int> read_video(const std::filesystem::path &path)
+    // return [fps, width, height, num_frames]
+    std::tuple<int, int, int, int> get_video_info(const std::filesystem::path &path)
     {
         cv::VideoCapture video;
         video.open(path.string());
@@ -20,18 +20,19 @@ namespace
         }
         const auto fps = video.get(cv::CAP_PROP_FPS);
 
-        std::vector<cv::Mat> images;
-        while (true)
+        cv::Mat image;
+        int num_frames = 0;
+        while(true)
         {
-            cv::Mat image;
             video >> image;
-            if (image.empty())
-            {
-                break;
-            }
-            images.push_back(image);
+            if (image.empty()) break;
+            num_frames++;
         }
-        return std::make_pair(images, fps);
+        int width = image.cols;
+        int height = image.rows;
+        video.release();
+        std::cout << "num_Frames" << num_frames << std::endl;
+        return std::make_tuple((int)fps, width, height, num_frames);
     }
 
     void write_video(const std::vector<cv::Mat> &images, const std::filesystem::path &path, const size_t &fps)
@@ -158,13 +159,11 @@ int main(int argc, char *argv[])
             }
 
             // Get video info
-            const auto [images, fps] = read_video(video_path);
-            const auto width = images[0].size().width;
-            const auto height = images[0].size().height;
-
+            const auto [fps, width, height, num_frames] = get_video_info(video_path);
+            cv::VideoCapture video;
             // Get detection results
-            const auto inputs_car = get_inputs(jobj_car, images.size(), width, height);
-            const auto inputs_pedestrian = get_inputs(jobj_pedestrian, images.size(), width, height);
+            const auto inputs_car = get_inputs(jobj_car, num_frames, width, height);
+            const auto inputs_pedestrian = get_inputs(jobj_pedestrian, num_frames, width, height);
 
             #ifdef RISCV
             int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
@@ -188,8 +187,17 @@ int main(int argc, char *argv[])
             // std::vector<cv::Mat> draw_images;
             std::vector<std::vector<byte_track::STrack>> outputs_car;
             std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
-            for (size_t fi = 0; fi < images.size(); fi++)
+            video.open(video_path.string());
+            if (video.isOpened() == false)
             {
+                throw std::runtime_error("Could not open the video file: " + video_path.string());
+            }
+
+            int fi = 0;
+            while(true){
+                cv::Mat image;
+                video >> image;
+                if (image.empty()) break;
                 // draw_images.push_back(images[fi].clone());
                 const auto copy = [](const auto tracker_outputs, auto &outputs) -> void
                 {
@@ -202,7 +210,9 @@ int main(int argc, char *argv[])
                 };
                 copy(car_tracker.update(inputs_car[fi]), outputs_car);
                 copy(pedestrian_tracker.update(inputs_pedestrian[fi]), outputs_pedestrian);
+                fi++;
             }
+            video.release();
 
             // Results: vector of vector{track_id, rect}, and the idx means frame_id
             using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;
@@ -229,7 +239,7 @@ int main(int argc, char *argv[])
                 }
 
                 // Validate
-                Results result(images.size());
+                Results result(num_frames);
                 for (const auto &[track_id, stracks] : map)
                 {
                     if (stracks.size() < 3)
@@ -249,7 +259,7 @@ int main(int argc, char *argv[])
 
             // Generate submit file
             std::vector<json11::Json> frame_objects;
-            for (size_t fi = 0; fi < images.size(); fi++)
+            for (int fi = 0; fi < num_frames; fi++)
             {
                 //key: category
                 //value: lists of tracked objects
