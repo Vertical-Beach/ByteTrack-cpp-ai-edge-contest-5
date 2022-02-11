@@ -103,207 +103,172 @@ int main(int argc, char *argv[])
     {
         if (argc < 3)
         {
-            throw std::runtime_error("Usage: $ ./generate_submit_file <detection results path> <videos path>");
+            throw std::runtime_error("Usage: $ ./generate_submit_file <detection results path> <video path>");
+        }
+        std::filesystem::path jsondir(argv[1]);
+        std::filesystem::path video_path(argv[2]);
+        std::cout << video_path.filename() << std::endl;
+        const std::string video_basename = video_path.stem();
+
+        const auto read_json = [&](std::filesystem::path jsondir, std::string basename, int cat_index, json11::Json &jobj) -> bool
+        {
+            auto jsonpath = jsondir;
+            jsonpath.append(basename + "_detection_result_" + std::to_string(cat_index) + ".json");
+            std::cout << jsonpath << std::endl;
+            if(!std::filesystem::exists(jsonpath)) return false;
+            std::ifstream ifs(jsonpath.string());
+            std::string jsonstr((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+            std::string err;
+            jobj = json11::Json::parse(jsonstr, err);
+            ifs.close();
+            return true;
+        };
+
+        json11::Json jobj_car, jobj_pedestrian;
+        if (!read_json(jsondir, video_basename, 0, jobj_car))
+        {
+            throw std::runtime_error("Could not open the json file");
+        }
+        if (!read_json(jsondir, video_basename, 1, jobj_pedestrian))
+        {
+            throw std::runtime_error("Could not open the json file");
         }
 
-        std::vector<std::filesystem::path> detection_results_path;
-        for (const auto &file : std::filesystem::directory_iterator(argv[1]))
+        // Get video info
+        const auto [fps, width, height, num_frames] = get_video_info(video_path);
+        cv::VideoCapture video;
+        // Get detection results
+        const auto inputs_car = get_inputs(jobj_car, num_frames, width, height);
+        const auto inputs_pedestrian = get_inputs(jobj_pedestrian, num_frames, width, height);
+
+        #ifdef RISCV
+        int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
+        int* riscv_dmem_base = (int*) mmap(NULL, 0x20000, PROT_READ|PROT_WRITE, MAP_SHARED, uio0_fd, 0);
+        int uio1_fd = open("/dev/uio1", O_RDWR | O_SYNC);
+        unsigned int* riscv_imem_base = (unsigned int*) mmap(NULL, 0x10000, PROT_READ|PROT_WRITE, MAP_SHARED, uio1_fd, 0);
+        if(uio0_fd < 0 || uio1_fd < 0){
+            std::cerr << "Device Open Failed" << std::endl;
+            return -1;
+        }
+        //write instruction
+        riscv_imm(riscv_imem_base);
+
+        byte_track::BYTETracker car_tracker(fps, fps, riscv_dmem_base);
+        byte_track::BYTETracker pedestrian_tracker(fps, fps, riscv_dmem_base);
+        #else
+        // Execute tracking
+        byte_track::BYTETracker car_tracker(fps, fps);
+        byte_track::BYTETracker pedestrian_tracker(fps, fps);
+        #endif
+        // std::vector<cv::Mat> draw_images;
+        std::vector<std::vector<byte_track::STrack>> outputs_car;
+        std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
+        video.open(video_path.string());
+        if (video.isOpened() == false)
         {
-            if (file.path().extension() == ".json")
-            {
-                detection_results_path.push_back(file);
-            }
+            throw std::runtime_error("Could not open the video file: " + video_path.string());
         }
 
-        std::vector<std::filesystem::path> videos_path;
-        for (const auto &file : std::filesystem::directory_iterator(argv[2]))
-        {
-            if (file.path().extension() == ".avi")
+        int fi = 0;
+        while(true){
+            cv::Mat image;
+            video >> image;
+            if (image.empty()) break;
+            // draw_images.push_back(images[fi].clone());
+            const auto copy = [](const auto tracker_outputs, auto &outputs) -> void
             {
-                videos_path.push_back(file);
-            }
-        }
-
-        std::sort(detection_results_path.begin(), detection_results_path.end());
-        std::sort(videos_path.begin(), videos_path.end());
-
-        //key: video_name
-        //value: tracked object dict list
-        std::map<std::string, json11::Json> frame_objects_map;
-        auto detection_results_filename_itr = detection_results_path.begin();
-        for (const auto &video_path : videos_path)
-        {
-            std::cout << video_path.filename() << std::endl;
-            const std::string video_basename = video_path.stem();
-            const auto read_json = [&](decltype(detection_results_path)::iterator &itr, json11::Json &jobj) -> bool
-            {
-                const auto &path = *itr;
-                const std::string basename = path.stem();
-                const auto prefix_is_same = (video_basename.size() <= basename.size() && std::equal(video_basename.begin(), video_basename.end(), basename.begin()));
-                if (prefix_is_same)
+                outputs.emplace_back();
+                for (const auto &tracker_output : tracker_outputs)
                 {
-                    // boost::property_tree::read_json(path.string(), pt);
-                    std::ifstream ifs(path.string());
-                    std::string jsonstr((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-                    std::string err;
-                    jobj = json11::Json::parse(jsonstr, err);
-                    ifs.close();
-                    itr++;
+                    // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
+                    outputs.back().push_back(*tracker_output.get());
                 }
-                return prefix_is_same;
+            };
+            copy(car_tracker.update(inputs_car[fi]), outputs_car);
+            copy(pedestrian_tracker.update(inputs_pedestrian[fi]), outputs_pedestrian);
+            fi++;
+        }
+        video.release();
+
+        // Results: vector of vector{track_id, rect}, and the idx means frame_id
+        using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;
+
+        // Validate tracks
+        const auto validate_outputs = [&](const std::vector<std::vector<byte_track::STrack>> &outputs) -> Results
+        {
+            // track_id -> vector of {frame_id, rect}
+            std::map<size_t, std::vector<std::pair<size_t, cv::Rect2i>>> map;
+
+            // Encode from std::vector<byte_track::STrack> to std::map<size_t, std::vector<std::pair<size_t, byte_track::Rect<float>>>>
+            for (size_t fi = 0; fi < outputs.size(); fi++)
+            {
+                for (size_t oi = 0; oi < outputs[fi].size(); oi++)
+                {
+                    const auto &strack = outputs[fi][oi];
+                    const auto rect2i = get_rounded_rect2i(strack.getRect(), width, height);
+                    if (1024 <= rect2i.area())
+                    {
+                        map.try_emplace(strack.getTrackId(), std::vector<std::pair<size_t, cv::Rect2i>>());
+                        map[strack.getTrackId()].emplace_back(fi, rect2i);
+                    }
+                }
+            }
+
+            // Validate
+            Results result(num_frames);
+            for (const auto &[track_id, stracks] : map)
+            {
+                if (stracks.size() < 3)
+                {
+                    continue;
+                }
+                for (const auto &[frame_id, rect] : stracks)
+                {
+                    result[frame_id].emplace_back(track_id, rect);
+                }
+            }
+            return result;
+        };
+
+        auto results_car = validate_outputs(outputs_car);
+        auto results_pedestrian = validate_outputs(outputs_pedestrian);
+        // Generate submit file
+        std::vector<json11::Json> frame_objects;
+        for (int fi = 0; fi < num_frames; fi++)
+        {
+            //key: category
+            //value: lists of tracked objects
+            std::map<std::string, std::vector<json11::Json>> objs_for_category_map;
+            const auto gen_objs_pt_and_draw_rect = [&](Results &results,
+                                                        const std::string &name) -> void
+            {
+                std::vector<json11::Json> objs_jobj;
+                for (const auto &[track_id, rect] : results[fi])
+                {
+                    auto jobj = json11::Json::object();
+                    jobj["id"] = (int)track_id;
+                    jobj["box2d"] = json11::Json::array({rect.tl().x, rect.tl().y, rect.br().x, rect.br().y});
+                    objs_jobj.push_back(jobj);
+                    // draw_rect(draw_images[fi], rect, track_id, name.substr(0, 1));
+                }
+                if (objs_jobj.size() != 0)
+                {
+                    objs_for_category_map[name] = objs_jobj;
+                }
             };
 
-            json11::Json jobj_car, jobj_pedestrian;
-            if (!read_json(detection_results_filename_itr, jobj_car))
-            {
-                continue;
-            }
-            if (!read_json(detection_results_filename_itr, jobj_pedestrian))
-            {
-                break;
-            }
-
-            // Get video info
-            const auto [fps, width, height, num_frames] = get_video_info(video_path);
-            cv::VideoCapture video;
-            // Get detection results
-            const auto inputs_car = get_inputs(jobj_car, num_frames, width, height);
-            const auto inputs_pedestrian = get_inputs(jobj_pedestrian, num_frames, width, height);
-
-            #ifdef RISCV
-            int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
-            int* riscv_dmem_base = (int*) mmap(NULL, 0x20000, PROT_READ|PROT_WRITE, MAP_SHARED, uio0_fd, 0);
-            int uio1_fd = open("/dev/uio1", O_RDWR | O_SYNC);
-            unsigned int* riscv_imem_base = (unsigned int*) mmap(NULL, 0x10000, PROT_READ|PROT_WRITE, MAP_SHARED, uio1_fd, 0);
-            if(uio0_fd < 0 || uio1_fd < 0){
-                std::cerr << "Device Open Failed" << std::endl;
-                return -1;
-            }
-            //write instruction
-            riscv_imm(riscv_imem_base);
-
-            byte_track::BYTETracker car_tracker(fps, fps, riscv_dmem_base);
-            byte_track::BYTETracker pedestrian_tracker(fps, fps, riscv_dmem_base);
-            #else
-            // Execute tracking
-            byte_track::BYTETracker car_tracker(fps, fps);
-            byte_track::BYTETracker pedestrian_tracker(fps, fps);
-            #endif
-            // std::vector<cv::Mat> draw_images;
-            std::vector<std::vector<byte_track::STrack>> outputs_car;
-            std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
-            video.open(video_path.string());
-            if (video.isOpened() == false)
-            {
-                throw std::runtime_error("Could not open the video file: " + video_path.string());
-            }
-
-            int fi = 0;
-            while(true){
-                cv::Mat image;
-                video >> image;
-                if (image.empty()) break;
-                // draw_images.push_back(images[fi].clone());
-                const auto copy = [](const auto tracker_outputs, auto &outputs) -> void
-                {
-                    outputs.emplace_back();
-                    for (const auto &tracker_output : tracker_outputs)
-                    {
-                        // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
-                        outputs.back().push_back(*tracker_output.get());
-                    }
-                };
-                copy(car_tracker.update(inputs_car[fi]), outputs_car);
-                copy(pedestrian_tracker.update(inputs_pedestrian[fi]), outputs_pedestrian);
-                fi++;
-            }
-            video.release();
-
-            // Results: vector of vector{track_id, rect}, and the idx means frame_id
-            using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;
-
-            // Validate tracks
-            const auto validate_outputs = [&](const std::vector<std::vector<byte_track::STrack>> &outputs) -> Results
-            {
-                // track_id -> vector of {frame_id, rect}
-                std::map<size_t, std::vector<std::pair<size_t, cv::Rect2i>>> map;
-
-                // Encode from std::vector<byte_track::STrack> to std::map<size_t, std::vector<std::pair<size_t, byte_track::Rect<float>>>>
-                for (size_t fi = 0; fi < outputs.size(); fi++)
-                {
-                    for (size_t oi = 0; oi < outputs[fi].size(); oi++)
-                    {
-                        const auto &strack = outputs[fi][oi];
-                        const auto rect2i = get_rounded_rect2i(strack.getRect(), width, height);
-                        if (1024 <= rect2i.area())
-                        {
-                            map.try_emplace(strack.getTrackId(), std::vector<std::pair<size_t, cv::Rect2i>>());
-                            map[strack.getTrackId()].emplace_back(fi, rect2i);
-                        }
-                    }
-                }
-
-                // Validate
-                Results result(num_frames);
-                for (const auto &[track_id, stracks] : map)
-                {
-                    if (stracks.size() < 3)
-                    {
-                        continue;
-                    }
-                    for (const auto &[frame_id, rect] : stracks)
-                    {
-                        result[frame_id].emplace_back(track_id, rect);
-                    }
-                }
-                return result;
-            };
-
-            auto results_car = validate_outputs(outputs_car);
-            auto results_pedestrian = validate_outputs(outputs_pedestrian);
-            // Generate submit file
-            std::vector<json11::Json> frame_objects;
-            for (int fi = 0; fi < num_frames; fi++)
-            {
-                //key: category
-                //value: lists of tracked objects
-                std::map<std::string, std::vector<json11::Json>> objs_for_category_map;
-                const auto gen_objs_pt_and_draw_rect = [&](Results &results,
-                                                           const std::string &name) -> void
-                {
-                    std::vector<json11::Json> objs_jobj;
-                    for (const auto &[track_id, rect] : results[fi])
-                    {
-                        auto jobj = json11::Json::object();
-                        jobj["id"] = (int)track_id;
-                        jobj["box2d"] = json11::Json::array({rect.tl().x, rect.tl().y, rect.br().x, rect.br().y});
-                        objs_jobj.push_back(jobj);
-                        // draw_rect(draw_images[fi], rect, track_id, name.substr(0, 1));
-                    }
-                    if (objs_jobj.size() != 0)
-                    {
-                        objs_for_category_map[name] = objs_jobj;
-                    }
-                };
-
-                gen_objs_pt_and_draw_rect(results_car, "Car");
-                gen_objs_pt_and_draw_rect(results_pedestrian, "Pedestrian");
-                frame_objects.push_back(json11::Json(objs_for_category_map));
-            }
-            // frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
-            std::ofstream file;
-            file.open("prediction_" + video_path.filename().string() + ".json");
-            file << json11::Json(frame_objects).dump();
-            file.close();
-
-            // Write video with tracking result
-            // write_video(draw_images, video_path.filename(), fps);
-
-            if (detection_results_filename_itr == detection_results_path.end())
-            {
-                break;
-            }
+            gen_objs_pt_and_draw_rect(results_car, "Car");
+            gen_objs_pt_and_draw_rect(results_pedestrian, "Pedestrian");
+            frame_objects.push_back(json11::Json(objs_for_category_map));
         }
+        // frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
+        std::ofstream file;
+        file.open((std::string)"prediction_" + (std::string)video_path.stem() + (std::string)".json");
+        file << json11::Json(frame_objects).dump();
+        file.close();
+
+        // Write video with tracking result
+        // write_video(draw_images, video_path.filename(), fps);
 
         // Write submit file
         // std::ofstream file;
