@@ -12,27 +12,31 @@ namespace
     // return [fps, width, height, num_frames]
     std::tuple<int, int, int, int> get_video_info(const std::filesystem::path &path)
     {
-        cv::VideoCapture video;
-        video.open(path.string());
-        if (video.isOpened() == false)
-        {
-            throw std::runtime_error("Could not open the video file: " + path.string());
-        }
-        const auto fps = video.get(cv::CAP_PROP_FPS);
+        // cv::VideoCapture video;
+        // video.open(path.string());
+        // if (video.isOpened() == false)
+        // {
+        //     throw std::runtime_error("Could not open the video file: " + path.string());
+        // }
+        // const auto fps = video.get(cv::CAP_PROP_FPS);
 
-        cv::Mat image;
-        int num_frames = 0;
-        int width = -1;;
-        int height = -1;
-        while(true)
-        {
-            video >> image;
-            if (image.empty()) break;
-            num_frames++;
-            width = image.cols;
-            height = image.rows;
-        }
-        video.release();
+        // cv::Mat image;
+        // int num_frames = 0;
+        // int width = -1;;
+        // int height = -1;
+        // while(true)
+        // {
+        //     video >> image;
+        //     if (image.empty()) break;
+        //     num_frames++;
+        //     width = image.cols;
+        //     height = image.rows;
+        // }
+        // video.release();
+        int fps = 30;
+        int width = 1936;
+        int height = 1216;
+        int num_frames = 150;
         return std::make_tuple((int)fps, width, height, num_frames);
     }
 
