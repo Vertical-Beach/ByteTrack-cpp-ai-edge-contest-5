@@ -17,7 +17,7 @@ public:
     #ifdef RISCV
     BYTETracker(const int& frame_rate = 30,
                 const int& track_buffer = 30,
-                int* riscv_dmem_base = NULL,
+                volatile int* riscv_dmem_base = NULL,
                 const float& track_thresh = 0.5,
                 const float& high_thresh = 0.6,
                 const float& match_thresh = 0.8);
@@ -76,7 +76,7 @@ private:
     std::vector<STrackPtr> lost_stracks_;
     std::vector<STrackPtr> removed_stracks_;
     #ifdef RISCV
-    int* riscv_dmem_base;
+    volatile int* riscv_dmem_base;
     #endif
 };
 }

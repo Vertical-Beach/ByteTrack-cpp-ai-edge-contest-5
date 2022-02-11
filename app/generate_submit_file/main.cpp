@@ -143,16 +143,18 @@ int main(int argc, char *argv[])
 
         #ifdef RISCV
         int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
-        int* riscv_dmem_base = (int*) mmap(NULL, 0x20000, PROT_READ|PROT_WRITE, MAP_SHARED, uio0_fd, 0);
+        volatile int* riscv_dmem_base = (int*) mmap(NULL, 0x20000, PROT_READ|PROT_WRITE, MAP_SHARED, uio0_fd, 0);
         int uio1_fd = open("/dev/uio1", O_RDWR | O_SYNC);
-        unsigned int* riscv_imem_base = (unsigned int*) mmap(NULL, 0x10000, PROT_READ|PROT_WRITE, MAP_SHARED, uio1_fd, 0);
+        volatile unsigned int* riscv_imem_base = (unsigned int*) mmap(NULL, 0x10000, PROT_READ|PROT_WRITE, MAP_SHARED, uio1_fd, 0);
         if(uio0_fd < 0 || uio1_fd < 0){
             std::cerr << "Device Open Failed" << std::endl;
             return -1;
         }
+        std::cout << "hello" << std::endl;
+        printf("%p %p\n", riscv_imem_base, riscv_dmem_base);
         //write instruction
         riscv_imm(riscv_imem_base);
-
+        std::cout << "write OK" << std::endl;
         byte_track::BYTETracker car_tracker(fps, fps, riscv_dmem_base);
         byte_track::BYTETracker pedestrian_tracker(fps, fps, riscv_dmem_base);
         #else

@@ -3,7 +3,7 @@
 #ifdef RISCV
 byte_track::BYTETracker::BYTETracker(const int& frame_rate,
                                      const int& track_buffer,
-                                     int* riscv_dmem_base,
+                                     volatile int* riscv_dmem_base,
                                      const float& track_thresh,
                                      const float& high_thresh,
                                      const float& match_thresh):

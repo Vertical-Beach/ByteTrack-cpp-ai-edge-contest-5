@@ -335,12 +335,12 @@ int byte_track::lapjv_internal(
 #include <ByteTrack/riscv_reset.h>
 int byte_track::lapjv_internal(
     const size_t _n, double *cost[],
-    int *x, int *y, int* riscv_dmem_base)
+    int *x, int *y, volatile int* riscv_dmem_base)
 {
     int n = (int)_n;
     //set input
     riscv_dmem_base[DMEM_OFFSET+0] = n;
-    float* dmem_base_float = (float*) riscv_dmem_base;
+    volatile float* dmem_base_float = (volatile float*) riscv_dmem_base;
     for(int i = 0; i < n; i++){
         for(int j = 0; j < n; j++){
             dmem_base_float[DMEM_OFFSET+i*n+j+1] = (float)(cost[i][j]);
@@ -356,8 +356,8 @@ int byte_track::lapjv_internal(
         if(endflag) break;
         usleep(1);
     }
-    int* riscv_x = &riscv_dmem_base[DMEM_OFFSET+1+n*n];
-    int* riscv_y = &riscv_dmem_base[DMEM_OFFSET+1+n*n+n];
+    volatile int* riscv_x = &riscv_dmem_base[DMEM_OFFSET+1+n*n];
+    volatile int* riscv_y = &riscv_dmem_base[DMEM_OFFSET+1+n*n+n];
     memcpy(x, (const int*)riscv_x, sizeof(int)*n);
     memcpy(y, (const int*)riscv_y, sizeof(int)*n);
     return 1;

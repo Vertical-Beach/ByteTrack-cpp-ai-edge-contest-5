@@ -1,4 +1,4 @@
-unsigned int riscv_imm(unsigned int *IMEM ) {
+unsigned int riscv_imm(volatile unsigned int *IMEM ) {
   IMEM[   0] = 0x00000093;
   IMEM[   1] = 0x00000113;
   IMEM[   2] = 0x00000193;
