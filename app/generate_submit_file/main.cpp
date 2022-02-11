@@ -22,16 +22,17 @@ namespace
 
         cv::Mat image;
         int num_frames = 0;
+        int width = -1;;
+        int height = -1;
         while(true)
         {
             video >> image;
             if (image.empty()) break;
             num_frames++;
+            width = image.cols;
+            height = image.rows;
         }
-        int width = image.cols;
-        int height = image.rows;
         video.release();
-        std::cout << "num_Frames" << num_frames << std::endl;
         return std::make_tuple((int)fps, width, height, num_frames);
     }
 
@@ -256,7 +257,6 @@ int main(int argc, char *argv[])
 
             auto results_car = validate_outputs(outputs_car);
             auto results_pedestrian = validate_outputs(outputs_pedestrian);
-
             // Generate submit file
             std::vector<json11::Json> frame_objects;
             for (int fi = 0; fi < num_frames; fi++)
@@ -286,7 +286,11 @@ int main(int argc, char *argv[])
                 gen_objs_pt_and_draw_rect(results_pedestrian, "Pedestrian");
                 frame_objects.push_back(json11::Json(objs_for_category_map));
             }
-            frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
+            // frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
+            std::ofstream file;
+            file.open("prediction_" + video_path.filename().string() + ".json");
+            file << json11::Json(frame_objects).dump();
+            file.close();
 
             // Write video with tracking result
             // write_video(draw_images, video_path.filename(), fps);
@@ -298,10 +302,10 @@ int main(int argc, char *argv[])
         }
 
         // Write submit file
-        std::ofstream file;
-        file.open("predictions.json");
-        file << json11::Json(frame_objects_map).dump();
-        file.close();
+        // std::ofstream file;
+        // file.open("predictions.json");
+        // file << json11::Json(frame_objects_map).dump();
+        // file.close();
 
     }
     catch (const std::exception &e)
