@@ -338,28 +338,38 @@ int byte_track::lapjv_internal(
     int *x, int *y, volatile int* riscv_dmem_base)
 {
     int n = (int)_n;
+    std::cout << "1 " << std::endl;
     //set input
     riscv_dmem_base[DMEM_OFFSET+0] = n;
+    std::cout << "2 " << std::endl;
     volatile float* dmem_base_float = (volatile float*) riscv_dmem_base;
     for(int i = 0; i < n; i++){
         for(int j = 0; j < n; j++){
             dmem_base_float[DMEM_OFFSET+i*n+j+1] = (float)(cost[i][j]);
         }
     }
+    std::cout << "3 " << std::endl;
     //set incomplete flag
     riscv_dmem_base[DMEM_OFFSET+(1+n*n+n*2)] = 0;
     //reset riscv
+    std::cout << "4 " << std::endl;
     reset_pl_resetn0();
+    std::cout << "5 " << std::endl;
     //wait for completion
     while(1){
         bool endflag = riscv_dmem_base[DMEM_OFFSET+(1+n*n+n*2)] == n*2;
         if(endflag) break;
         usleep(1);
     }
+    std::cout << "6 " << std::endl;
     volatile int* riscv_x = &riscv_dmem_base[DMEM_OFFSET+1+n*n];
     volatile int* riscv_y = &riscv_dmem_base[DMEM_OFFSET+1+n*n+n];
-    memcpy(x, (const int*)riscv_x, sizeof(int)*n);
-    memcpy(y, (const int*)riscv_y, sizeof(int)*n);
+    std::cout << "7 " << std::endl;
+    for(int i = 0; i < n; i++) x[i] = riscv_x[i];
+    for(int i = 0; i < n; i++) y[i] = riscv_y[i];
+    // memcpy(x, (const volatile void*)riscv_x, sizeof(int)*n);
+    std::cout << "8 " << std::endl;
+    // memcpy(y, (const volatile void*)riscv_y, sizeof(int)*n);
     return 1;
 
 }

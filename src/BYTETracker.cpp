@@ -537,11 +537,11 @@ double byte_track::BYTETracker::execLapjv(const std::vector<std::vector<float>> 
         }
     }
 
-    int* x_c = new int[sizeof(int) * n];
-    int *y_c = new int[sizeof(int) * n];
 
     int ret;
     #ifdef RISCV
+    int* x_c = new int[sizeof(int) * n];
+    int *y_c = new int[sizeof(int) * n];
     ret = lapjv_internal(n, cost_ptr, x_c, y_c, riscv_dmem_base);
     #else
     ret = lapjv_internal(n, cost_ptr, x_c, y_c);
