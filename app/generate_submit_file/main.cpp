@@ -150,11 +150,8 @@ int main(int argc, char *argv[])
             std::cerr << "Device Open Failed" << std::endl;
             return -1;
         }
-        std::cout << "hello" << std::endl;
-        printf("%p %p\n", riscv_imem_base, riscv_dmem_base);
         //write instruction
         riscv_imm(riscv_imem_base);
-        std::cout << "write OK" << std::endl;
         byte_track::BYTETracker car_tracker(fps, fps, riscv_dmem_base);
         byte_track::BYTETracker pedestrian_tracker(fps, fps, riscv_dmem_base);
         #else
@@ -268,16 +265,6 @@ int main(int argc, char *argv[])
         file.open((std::string)"prediction_" + (std::string)video_path.stem() + (std::string)".json");
         file << json11::Json(frame_objects).dump();
         file.close();
-
-        // Write video with tracking result
-        // write_video(draw_images, video_path.filename(), fps);
-
-        // Write submit file
-        // std::ofstream file;
-        // file.open("predictions.json");
-        // file << json11::Json(frame_objects_map).dump();
-        // file.close();
-
     }
     catch (const std::exception &e)
     {
