@@ -210,7 +210,7 @@ int main(int argc, char *argv[])
                 copy(car_tracker.update(json_inputs_car[fi], fp), outputs_car);
                 copy(pedestrian_tracker.update(json_inputs_pedestrian[fi], fp), outputs_pedestrian);
             }
-            else if (runmode == "DPU")
+            else if (runmode == "dpu")
             {
                 #ifdef DPU
                 auto detection_results = yolorunner->Run(image);

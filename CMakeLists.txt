@@ -39,6 +39,14 @@ if(RISCV)
   message(STATUS "Use RISCV")
 endif()
 
+set(DPU OFF CACHE BOOL "The flag whether to use dpu or not")
+if(DPU)
+  message("Use DPU")
+  add_definitions(-DDPU)
+  # overwrite OoenCV_LIBS to avoid protobuf error
+  set(OpenCV_LIBS "-lopencv_core -lopencv_video -lopencv_videoio -lopencv_imgproc -lopencv_imgcodecs -lopencv_highgui")
+endif()
+
 include_directories(
   ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}

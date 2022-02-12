@@ -360,7 +360,7 @@ int byte_track::lapjv_internal(
     volatile int* riscv_y = &riscv_dmem_base[DMEM_OFFSET+1+n*n+n];
     for(int i = 0; i < n; i++) x[i] = riscv_x[i];
     for(int i = 0; i < n; i++) y[i] = riscv_y[i];
-    return 1;
+    return 0;
 
 }
 #endif
