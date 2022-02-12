@@ -13,6 +13,7 @@ byte_track::FeatureProvider::~FeatureProvider()
 
 void byte_track::FeatureProvider::setImage(const cv::Mat &image)
 {
+    original_size_ = image.size();
     cv::resize(image, image_, cv::Size(image.cols * cfg_.scale, image.rows * cfg_.scale), 0, 0, cv::INTER_LINEAR);
     preproc();
 }
@@ -20,6 +21,16 @@ void byte_track::FeatureProvider::setImage(const cv::Mat &image)
 const cv::Mat& byte_track::FeatureProvider::getScaledImage() const
 {
     return image_;
+}
+
+size_t byte_track::FeatureProvider::getImageWidth() const
+{
+    return original_size_.width;
+}
+
+size_t byte_track::FeatureProvider::getImageHeight() const
+{
+    return original_size_.height;
 }
 
 cv::Rect2i byte_track::FeatureProvider::rect2ScaledRect2i(const byte_track::Rect<float> &rect) const

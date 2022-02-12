@@ -34,6 +34,9 @@ public:
 
     const cv::Mat& getScaledImage() const;
 
+    size_t getImageWidth() const;
+    size_t getImageHeight() const;
+
     cv::Rect2i rect2ScaledRect2i(const byte_track::Rect<float> &rect) const;
 
     std::vector<float> getLbpFeature(const byte_track::Rect<float> &rect) const;
@@ -48,6 +51,7 @@ private:
 
     const Cfg cfg_;
 
+    cv::Size original_size_;
     cv::Mat image_;
     cv::Mat hue_;
     cv::Mat saturation_;
