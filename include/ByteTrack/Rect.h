@@ -39,6 +39,8 @@ class Rect
     T br_x() const;
     T br_y() const;
 
+    T area() const;
+
     Tlbr<T> getTlbr() const;
     Xyah<T> getXyah() const;
 
