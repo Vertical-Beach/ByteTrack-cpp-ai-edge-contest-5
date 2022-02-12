@@ -51,8 +51,8 @@ private:
                           std::vector<int> &b_unmatched,
                           std::vector<int> &a_unmatched) const;
 
-    std::vector<std::vector<float>> calcLBPCostMatrix(const std::vector<STrack> &a_tracks,
-                                                      const std::vector<STrackPtr> &b_tracks) const;
+    std::vector<std::vector<std::pair<float, size_t>>> calcAppearanceCostMatrix(const std::vector<STrack> &a_tracks,
+                                                                                const std::vector<STrackPtr> &b_tracks) const;
 
     float calcCosSimilarity(const std::vector<float> &a, const std::vector<float> &b) const;
 
@@ -61,6 +61,9 @@ private:
 
     std::vector<std::vector<float>> calcIous(const std::vector<Rect<float>> &a_rect,
                                              const std::vector<Rect<float>> &b_rect) const;
+
+    std::vector<std::vector<std::pair<float, size_t>>> calcDistCostMatrix(const std::vector<STrackPtr> &a_tracks,
+                                                                          const std::vector<STrackPtr> &b_tracks) const;
 
     double execLapjv(const std::vector<std::vector<float> > &cost,
                      std::vector<int> &rowsol,
