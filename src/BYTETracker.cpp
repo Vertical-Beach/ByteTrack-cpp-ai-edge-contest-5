@@ -1,14 +1,7 @@
 #include <ByteTrack/BYTETracker.h>
 
-byte_track::BYTETracker::BYTETracker(const int& frame_rate,
-                                     const int& track_buffer,
-                                     const float& track_thresh,
-                                     const float& high_thresh,
-                                     const float& match_thresh) :
-    track_thresh_(track_thresh),
-    high_thresh_(high_thresh),
-    match_thresh_(match_thresh),
-    max_time_lost_(5),
+byte_track::BYTETracker::BYTETracker(const Cfg &cfg) :
+    cfg_(cfg),
     frame_id_(0),
     track_id_count_(0)
 {
@@ -31,7 +24,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     for (const auto &object : objects)
     {
         const auto strack = std::make_shared<STrack>(object.rect, object.prob, fp_ptr);
-        if (object.prob >= track_thresh_)
+        if (object.prob >= cfg_.track_thr)
         {
             det_stracks.push_back(strack);
         }
@@ -79,7 +72,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<int> unmatch_detection_idx, unmatch_track_idx;
 
         const auto dists = calcFirstCostMatrix(strack_pool, strack_pool_prev, det_stracks);
-        linearAssignment(dists, strack_pool.size(), det_stracks.size(), match_thresh_,
+        linearAssignment(dists, strack_pool.size(), det_stracks.size(), cfg_.first_match_thr,
                          matches_idx, unmatch_track_idx, unmatch_detection_idx);
 
         for (const auto &match_idx : matches_idx)
@@ -120,7 +113,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         std::vector<int> unmatch_track_idx, unmatch_detection_idx;
 
         const auto dists = calcSecondCostMatrix(remain_tracked_stracks, det_low_stracks);
-        linearAssignment(dists, remain_tracked_stracks.size(), det_low_stracks.size(), 0.5,
+        linearAssignment(dists, remain_tracked_stracks.size(), det_low_stracks.size(), cfg_.second_match_thr,
                          matches_idx, unmatch_track_idx, unmatch_detection_idx);
 
         for (const auto &match_idx : matches_idx)
@@ -160,7 +153,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
 
         // Deal with unconfirmed tracks, usually tracks with only one beginning frame
         const auto dists = calcIoUCostMatrix(non_active_stracks, remain_det_stracks);
-        linearAssignment(dists, non_active_stracks.size(), remain_det_stracks.size(), 0.7,
+        linearAssignment(dists, non_active_stracks.size(), remain_det_stracks.size(), cfg_.unconfirmed_match_thr,
                          matches_idx, unmatch_unconfirmed_idx, unmatch_detection_idx);
 
         for (const auto &match_idx : matches_idx)
@@ -180,7 +173,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
         for (const auto &unmatch_idx : unmatch_detection_idx)
         {
             const auto track = remain_det_stracks[unmatch_idx];
-            if (track->getScore() < high_thresh_)
+            if (track->getScore() < cfg_.high_thr)
             {
                 continue;
             }
@@ -193,7 +186,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     ////////////////// Step 5: Update state //////////////////
     for (const auto &lost_strack : lost_stracks_)
     {
-        if (frame_id_ - lost_strack->getFrameId() > max_time_lost_)
+        if (frame_id_ - lost_strack->getFrameId() > cfg_.len_lost_time)
         {
             lost_strack->markAsRemoved();
             current_removed_stracks.push_back(lost_strack);
@@ -204,10 +197,13 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     lost_stracks_ = subStracks(jointStracks(subStracks(lost_stracks_, tracked_stracks_), current_lost_stracks), removed_stracks_);
     removed_stracks_ = jointStracks(removed_stracks_, current_removed_stracks);
 
-    // std::vector<STrackPtr> tracked_stracks_out, lost_stracks_out;
-    // removeDuplicateStracks(tracked_stracks_, lost_stracks_, tracked_stracks_out, lost_stracks_out);
-    // tracked_stracks_ = tracked_stracks_out;
-    // lost_stracks_ = lost_stracks_out;
+    if (cfg_.remove_duplicate_stracks)
+    {
+        std::vector<STrackPtr> tracked_stracks_out, lost_stracks_out;
+        removeDuplicateStracks(tracked_stracks_, lost_stracks_, tracked_stracks_out, lost_stracks_out);
+        tracked_stracks_ = tracked_stracks_out;
+        lost_stracks_ = lost_stracks_out;
+    }
 
     std::vector<STrackPtr> output_stracks;
     for (auto &track : tracked_stracks_)
@@ -372,46 +368,34 @@ std::vector<std::vector<float>> byte_track::BYTETracker::calcFirstCostMatrix(con
             */
             const auto &b_rect = b_tracks[bi]->getRect();
             const auto area_retio = a_rect.area() / b_rect.area();
-            if (2.0 <= area_retio || 0.6 < appearance_cost[ai][bi].first)
+
+            if (cfg_.max_area_retio < area_retio || cfg_.min_appearance_cost < appearance_cost[ai][bi].first)
             {
                 cost_matrix[ai][bi] = 1;
             }
-            else if (a_tracks[ai]->getSTrackState() == STrackState::Lost && 0.4 < appearance_cost[ai][bi].first)
+            else if (a_tracks[ai]->getSTrackState() == STrackState::Lost && cfg_.min_appearance_cost_for_lost_track < appearance_cost[ai][bi].first)
             {
                 cost_matrix[ai][bi] = 1;
             }
-            else if (stray_a_rect && 0.1 < appearance_cost[ai][bi].first)
+            else if (stray_a_rect && cfg_.min_appearance_cost_for_stray_rect < appearance_cost[ai][bi].first)
             {
                 cost_matrix[ai][bi] = 1;
             }
             else
             {
                 cost_matrix[ai][bi] = iou_cost[ai][bi];
-                if (!stray_a_rect)
+                if (!stray_a_rect && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
                 {
-                    if (dist_cost[ai][bi].second == 0 && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
+                    const auto &dist_sort_idx = dist_cost[ai][bi].second;
+                    if (dist_sort_idx < cfg_.max_len_dist_cost)
                     {
-                        cost_matrix[ai][bi] *= 0.7f;
+                        cost_matrix[ai][bi] *= cfg_.start_cost_dist_cost - cfg_.step_dist_cost * (cfg_.max_len_dist_cost - dist_sort_idx - 1);
                     }
-                    else if (dist_cost[ai][bi].second == 1 && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
+
+                    const auto &a_sort_idx = appearance_cost[ai][bi].second;
+                    if (a_sort_idx < cfg_.max_len_appearance_cost)
                     {
-                        cost_matrix[ai][bi] *= 0.8f;
-                    }
-                    else if (dist_cost[ai][bi].second == 2 && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
-                    {
-                        cost_matrix[ai][bi] *= 0.9f;
-                    }
-                    if (appearance_cost[ai][bi].second == 0 && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
-                    {
-                        cost_matrix[ai][bi] *= 0.85f;
-                    }
-                    else if (appearance_cost[ai][bi].second == 1 && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
-                    {
-                        cost_matrix[ai][bi] *= 0.9f;
-                    }
-                    else if (appearance_cost[ai][bi].second == 2 && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
-                    {
-                        cost_matrix[ai][bi] *= 0.95f;
+                        cost_matrix[ai][bi] *= cfg_.start_cost_appearance_cost - cfg_.step_appearance_cost * (cfg_.max_len_appearance_cost - a_sort_idx - 1);
                     }
                 }
             }
@@ -589,7 +573,9 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
             cv::imshow("scaled_image", draw_scaled_image);
             cv::waitKey(0);
             */
-            const auto w_mean = 0.2 * lbp_simirality + 0.5 * hue_simirality + 0.3 * saturation_simirality;
+            const auto w_mean = cfg_.appearance_lbp_weight * lbp_simirality +
+                                cfg_.appearance_hue_weight * hue_simirality +
+                                cfg_.appearance_saturation_weight * saturation_simirality;
             similarity_with_idx.emplace_back(1 - w_mean, bi);
         }
 
@@ -683,8 +669,8 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
             const auto b_v_norm = std::sqrt(b_xv * b_xv + b_yv * b_yv);
             const auto cos = (a_xv * b_xv + a_yv * b_yv) / (a_v_norm * b_v_norm);
             const auto dist = std::sqrt((a_xc - b_xc) * (a_xc - b_xc) + (a_yc - b_yc) * (a_yc - b_yc));
-            if (((a_xv != 0 && a_yv != 0) && 0 < cos && dist < 300) ||
-                ((a_xv == 0 && a_yv == 0) && dist < 300))
+            if (((a_xv != 0 && a_yv != 0) && 0 < cos && dist < cfg_.dist_cost_max_pix) ||
+                ((a_xv == 0 && a_yv == 0) && dist < cfg_.dist_cost_max_pix))
             {
                 distances_with_idx.emplace_back(dist, bi);
             }
