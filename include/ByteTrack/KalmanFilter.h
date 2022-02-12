@@ -17,8 +17,8 @@ public:
     using StateHMean = Eigen::Matrix<float, 1, 4, Eigen::RowMajor>;
     using StateHCov = Eigen::Matrix<float, 4, 4, Eigen::RowMajor>;
 
-    KalmanFilter(const float& std_weight_position = 1. / 20,
-                 const float& std_weight_velocity = 1. / 160);
+    KalmanFilter(const float& std_weight_position = 1.0f,
+                 const float& std_weight_velocity = 1.0f);
 
     void initiate(StateMean& mean, StateCov& covariance, const DetectBox& measurement);
 
