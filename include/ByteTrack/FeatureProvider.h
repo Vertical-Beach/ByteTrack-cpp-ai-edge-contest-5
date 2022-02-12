@@ -10,7 +10,7 @@ namespace byte_track
 
 struct FeatureProviderCfg
 {
-    float scale {1.0};
+    float scale {0.4};
     LBPFeatureExtractor::Type lbp_type {LBPFeatureExtractor::Type::NORMAL};
     int n_lbp_feature_hist_bins {10};
     int n_hue_hist_bins {10};
