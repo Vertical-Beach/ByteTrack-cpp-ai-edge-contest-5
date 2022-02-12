@@ -1,7 +1,10 @@
 #pragma once
 
+#include <memory>
+
 #include <ByteTrack/Rect.h>
 #include <ByteTrack/KalmanFilter.h>
+#include <ByteTrack/FeatureProvider.h>
 
 namespace byte_track
 {
@@ -15,11 +18,21 @@ enum class STrackState {
 class STrack
 {
 public:
-    STrack(const Rect<float>& rect, const float& score);
+    using FeatureProviderPtr = std::shared_ptr<FeatureProvider>;
+
+    STrack(const Rect<float>& rect, const float& score, const FeatureProviderPtr &fp_ptr);
     ~STrack();
+
+    const KalmanFilter::StateMean& getKFStateMean() const;
 
     const Rect<float>& getRect() const;
     const STrackState& getSTrackState() const;
+
+    const std::vector<float>& getLBPFeature() const;
+    const std::vector<float>& getHueFeature() const;
+    const std::vector<float>& getSaturationFeature() const;
+
+    const FeatureProviderPtr& getFeatureProviderPtr() const;
 
     const bool& isActivated() const;
     const float& getScore() const;
@@ -45,6 +58,11 @@ private:
     Rect<float> rect_;
     STrackState state_;
 
+    FeatureProviderPtr fp_ptr_;
+    std::vector<float> lbp_feature_;
+    std::vector<float> hue_feature_;
+    std::vector<float> saturation_feature_;
+
     bool is_activated_;
     float score_;
     size_t track_id_;
@@ -52,6 +70,6 @@ private:
     size_t start_frame_id_;
     size_t tracklet_len_;
 
-    void updateRect();
+    void updateRect(const bool &update_feature = true);
 };
 }

@@ -169,12 +169,12 @@ int main(int argc, char *argv[])
         }
         //write instruction
         riscv_imm(riscv_imem_base);
-        byte_track::BYTETracker car_tracker(fps, fps, riscv_dmem_base);
-        byte_track::BYTETracker pedestrian_tracker(fps, fps, riscv_dmem_base);
+        auto car_tracker = byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base);
+        auto pedestrian_tracker = byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base);
         #else
         // Execute tracking
-        byte_track::BYTETracker car_tracker(fps, fps);
-        byte_track::BYTETracker pedestrian_tracker(fps, fps);
+        auto car_tracker = byte_track::BYTETracker();
+        auto pedestrian_tracker = byte_track::BYTETracker();
         #endif
 
 
@@ -204,18 +204,18 @@ int main(int argc, char *argv[])
                     outputs.back().push_back(*tracker_output.get());
                 }
             };
-
+            byte_track::FeatureProvider fp(image);
             if (runmode == "json")
             {
-                copy(car_tracker.update(json_inputs_car[fi]), outputs_car);
-                copy(pedestrian_tracker.update(json_inputs_pedestrian[fi]), outputs_pedestrian);
+                copy(car_tracker.update(json_inputs_car[fi], fp), outputs_car);
+                copy(pedestrian_tracker.update(json_inputs_pedestrian[fi], fp), outputs_pedestrian);
             }
             else if (runmode == "DPU")
             {
                 #ifdef DPU
                 auto detection_results = yolorunner->Run(image);
-                copy(car_tracker.update(detection_results[0]), outputs_car);
-                copy(pedestrian_tracker.update(detection_results[1]), outputs_pedestrian);
+                copy(car_tracker.update(detection_results[0], fp), outputs_car);
+                copy(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
                 #endif
             }
             fi++;

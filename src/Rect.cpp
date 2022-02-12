@@ -84,6 +84,12 @@ T byte_track::Rect<T>::br_y() const
 }
 
 template <typename T>
+T byte_track::Rect<T>::area() const
+{
+    return tlwh[2] * tlwh[3];
+}
+
+template <typename T>
 byte_track::Tlbr<T> byte_track::Rect<T>::getTlbr() const
 {
     return {
