@@ -68,11 +68,11 @@ class YoloRunner{
     auto result = results[0]; //batch_size is 1
     vector<vector<byte_track::Object>> objs(2); //[car, pedestrian]
     for(auto& yolobbox: result.bboxes){
-      float xmin = std::max((float)0, yolobbox.x * img.cols);
-      float ymin = std::max((float)0, yolobbox.y * img.rows);
-      float xmax = std::min((yolobbox.x + yolobbox.width) * img.cols, (float)img.cols);
-      float ymax = std::min((yolobbox.y + yolobbox.height) * img.rows, (float)img.rows);
-      auto rect = byte_track::Rect(xmin, ymin, xmax - xmin, ymax - ymin);
+      const auto x = std::clamp(yolobbox.x * (float)img.cols, 0.F, img.cols - 1.F);
+      const auto y = std::clamp(yolobbox.y * (float)img.rows, 0.F, img.rows - 1.F);
+      const auto width = std::clamp(yolobbox.width * (float)img.cols, 0.F, img.cols - x);
+      const auto height = std::clamp(yolobbox.height * (float)img.rows, 0.F, img.rows - y);
+      auto rect = byte_track::Rect(x, y, width, height);
       objs[yolobbox.label].push_back(byte_track::Object(rect, yolobbox.label, yolobbox.score));
     }
     return objs;
