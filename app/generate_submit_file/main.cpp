@@ -33,7 +33,7 @@ namespace
         //     height = image.rows;
         // }
         // video.release();
-        int fps = 30;
+        int fps = 5;
         int width = 1936;
         int height = 1216;
         int num_frames = 150;
