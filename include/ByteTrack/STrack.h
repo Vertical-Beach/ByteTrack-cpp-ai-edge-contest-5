@@ -23,6 +23,8 @@ public:
     STrack(const Rect<float>& rect, const float& score, const FeatureProviderPtr &fp_ptr);
     ~STrack();
 
+    const KalmanFilter::StateMean& getKFStateMean() const;
+
     const Rect<float>& getRect() const;
     const STrackState& getSTrackState() const;
 
@@ -31,8 +33,6 @@ public:
     const std::vector<float>& getSaturationFeature() const;
 
     const FeatureProviderPtr& getFeatureProviderPtr() const;
-
-    void setFeatureProviderPtr(const FeatureProviderPtr& fp_ptr);
 
     const bool& isActivated() const;
     const float& getScore() const;
@@ -70,6 +70,6 @@ private:
     size_t start_frame_id_;
     size_t tracklet_len_;
 
-    void updateRect();
+    void updateRect(const bool &update_feature = true);
 };
 }

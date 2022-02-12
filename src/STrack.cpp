@@ -24,6 +24,11 @@ byte_track::STrack::~STrack()
 {
 }
 
+const byte_track::KalmanFilter::StateMean& byte_track::STrack::getKFStateMean() const
+{
+    return mean_;
+}
+
 const byte_track::Rect<float>& byte_track::STrack::getRect() const
 {
     return rect_;
@@ -52,11 +57,6 @@ const std::vector<float>& byte_track::STrack::getSaturationFeature() const
 const byte_track::STrack::FeatureProviderPtr& byte_track::STrack::getFeatureProviderPtr() const
 {
     return fp_ptr_;
-}
-
-void byte_track::STrack::setFeatureProviderPtr(const FeatureProviderPtr& fp_ptr)
-{
-    fp_ptr_ = fp_ptr;
 }
 
 const bool& byte_track::STrack::isActivated() const
@@ -92,7 +92,8 @@ void byte_track::STrack::activate(const size_t& frame_id, const size_t& track_id
 {
     kalman_filter_.initiate(mean_, covariance_, rect_.getXyah());
 
-    updateRect();
+    constexpr bool update_feature = false;
+    updateRect(update_feature);
 
     state_ = STrackState::Tracked;
     if (frame_id == 1)
@@ -109,17 +110,20 @@ void byte_track::STrack::reActivate(const STrack &new_track, const size_t &frame
 {
     kalman_filter_.update(mean_, covariance_, new_track.getRect().getXyah());
 
-    updateRect();
-
     state_ = STrackState::Tracked;
     is_activated_ = true;
-    score_ = new_track.getScore();
     if (0 <= new_track_id)
     {
         track_id_ = new_track_id;
     }
     frame_id_ = frame_id;
     tracklet_len_ = 0;
+
+    score_ = new_track.getScore();
+    fp_ptr_ = new_track.getFeatureProviderPtr();
+
+    constexpr bool update_feature = true;
+    updateRect(update_feature);
 }
 
 void byte_track::STrack::predict()
@@ -130,20 +134,24 @@ void byte_track::STrack::predict()
     }
     kalman_filter_.predict(mean_, covariance_);
 
-    updateRect();
+    const bool update_feature = (state_ == STrackState::Tracked);
+    updateRect(update_feature);
 }
 
 void byte_track::STrack::update(const STrack &new_track, const size_t &frame_id)
 {
     kalman_filter_.update(mean_, covariance_, new_track.getRect().getXyah());
 
-    updateRect();
-
     state_ = STrackState::Tracked;
     is_activated_ = true;
-    score_ = new_track.getScore();
     frame_id_ = frame_id;
     tracklet_len_++;
+
+    score_ = new_track.getScore();
+    fp_ptr_ = new_track.getFeatureProviderPtr();
+
+    constexpr bool update_feature = true;
+    updateRect(update_feature);
 }
 
 void byte_track::STrack::markAsLost()
@@ -156,15 +164,18 @@ void byte_track::STrack::markAsRemoved()
     state_ = STrackState::Removed;
 }
 
-void byte_track::STrack::updateRect()
+void byte_track::STrack::updateRect(const bool &update_feature)
 {
     rect_.width() = mean_[2] * mean_[3];
     rect_.height() = mean_[3];
     rect_.x() = mean_[0] - rect_.width() / 2;
     rect_.y() = mean_[1] - rect_.height() / 2;
 
-    lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
-    const auto [hue_feature, saturation_feature] = fp_ptr_->getColorFeature(rect_);
-    hue_feature_ = std::move(hue_feature);
-    saturation_feature_ = std::move(saturation_feature);
+    if (update_feature)
+    {
+        lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
+        const auto [hue_feature, saturation_feature] = fp_ptr_->getColorFeature(rect_);
+        hue_feature_ = std::move(hue_feature);
+        saturation_feature_ = std::move(saturation_feature);
+    }
 }

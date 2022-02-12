@@ -214,7 +214,6 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     {
         if (track->isActivated())
         {
-            track->setFeatureProviderPtr(fp_ptr);
             output_stracks.push_back(track);
         }
     }
