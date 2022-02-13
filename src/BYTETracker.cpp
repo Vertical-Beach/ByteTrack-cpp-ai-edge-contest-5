@@ -33,7 +33,16 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
     const auto fp_ptr = std::make_shared<FeatureProvider>(fp);
     for (const auto &object : objects)
     {
-        const auto strack = std::make_shared<STrack>(object.rect, object.prob, fp_ptr);
+        const auto strack = std::make_shared<STrack>(
+            object.rect,
+            object.prob,
+            fp_ptr,
+            cfg_.appearance_rect_h_padding_ratio,
+            cfg_.appearance_rect_v_padding_ratio,
+            cfg_.appearance_block_h_size,
+            cfg_.appearance_block_v_size
+        );
+
         if (object.prob >= cfg_.track_thr)
         {
             det_stracks.push_back(strack);
@@ -577,9 +586,13 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
                 cv::putText(image, label, cv::Point(rect.tl().x, rect.tl().y - 10), cv::FONT_HERSHEY_PLAIN, 1, color, 1, cv::LINE_AA);
             };
             const auto &b_rect = b_track->getRect();
+            const auto a_scaled_rect_prev = fp_ptr->rect2ScaledRect2i(a_rect_prev);
+            const auto b_scaled_rect = fp_ptr->rect2ScaledRect2i(b_rect);
+
             cv::Mat draw_scaled_image = scaled_image.clone();
-            draw_rect(draw_scaled_image, fp_ptr->rect2ScaledRect2i(a_rect_prev), cv::Scalar(0, 255, 0), "Base");
-            draw_rect(draw_scaled_image, fp_ptr->rect2ScaledRect2i(b_rect), cv::Scalar(0, 0, 255), "Detection");
+            draw_rect(draw_scaled_image, a_scaled_rect_prev, cv::Scalar(0, 255, 0), "Base");
+            draw_rect(draw_scaled_image, b_scaled_rect, cv::Scalar(0, 0, 255), "Detection");
+            cv::namedWindow("scaled_image", cv::WINDOW_NORMAL);
             cv::imshow("scaled_image", draw_scaled_image);
             cv::waitKey(0);
             */
@@ -669,6 +682,8 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
         const auto a_xv = kf_mean[4];
         const auto a_yv = kf_mean[5];
         const auto a_v_norm = std::sqrt(a_xv * a_xv + a_yv * a_yv);
+        const auto a_rect_short_side_len = std::max(a_track->getRect().width(), a_track->getRect().height());
+        const auto dist_near_pix = std::min(cfg_.dist_cost_max_pix, a_rect_short_side_len / 2);
         for (size_t bi = 0; bi < b_tracks.size(); bi++)
         {
             const auto &b_rect = b_tracks[bi]->getRect();
@@ -677,16 +692,24 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
             const auto b_xv = b_xc - a_xc;
             const auto b_yv = b_yc - a_yc;
             const auto b_v_norm = std::sqrt(b_xv * b_xv + b_yv * b_yv);
-            const auto cos = (a_xv * b_xv + a_yv * b_yv) / (a_v_norm * b_v_norm);
             const auto dist = std::sqrt((a_xc - b_xc) * (a_xc - b_xc) + (a_yc - b_yc) * (a_yc - b_yc));
-            if (((a_xv != 0 && a_yv != 0) && 0 < cos && dist < cfg_.dist_cost_max_pix) ||
-                ((a_xv == 0 && a_yv == 0) && dist < cfg_.dist_cost_max_pix))
+            if (dist == 0)
             {
                 distances_with_idx.emplace_back(dist, bi);
             }
             else
             {
-                distances_with_idx.emplace_back(std::numeric_limits<float>::max(), bi);
+                const auto cos = (a_xv * b_xv + a_yv * b_yv) / (a_v_norm * b_v_norm);
+                if ((dist < dist_near_pix) ||
+                    ((a_xv != 0 && a_yv != 0) && 0 < cos && dist < cfg_.dist_cost_max_pix) ||
+                    ((a_xv == 0 && a_yv == 0) && dist < cfg_.dist_cost_max_pix))
+                {
+                    distances_with_idx.emplace_back(dist, bi);
+                }
+                else
+                {
+                    distances_with_idx.emplace_back(std::numeric_limits<float>::max(), bi);
+                }
             }
         }
 
