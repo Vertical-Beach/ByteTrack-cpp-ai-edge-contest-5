@@ -158,83 +158,38 @@ namespace
         size_t r_idx_{0}, w_idx_{0};
     };
     ObjWithMtx<bool> no_abnormality(true);
-    // using LoadVideoFIFOElementType  = cv::Mat;
     using InferenceFIFOElementType = std::pair<cv::Mat, std::vector<std::vector<byte_track::Object>>>;
-    // using PostprocFIFOElementType = std::array<int8_t, DPU_OUTPUT_IMG_WIDTH * DPU_OUTPUT_IMG_HEIGHT * DPU_OUTPUT_NOF_CLASS>;
-    // constexpr auto LoadVideoFIFO_DEPTH = 30U;
     constexpr auto InferenceFIFO_DEPTH = 30U;
     constexpr auto SLEEP_T_US = 100U;
-    // MultiThreadFIFO<LoadVideoFIFOElementType, LoadVideoFIFO_DEPTH> loadvideo_fifo(SLEEP_T_US);
     std::vector<cv::Mat> video_images;
     MultiThreadFIFO<InferenceFIFOElementType, InferenceFIFO_DEPTH> inference_fifo(SLEEP_T_US);
-    // MultiThreadFIFO<PostprocFIFOElementType, POSTPROC_FIFO_DEPTH> postproc_fifo(SLEEP_T_US);
-    // int width = 0;
-    // int height = 0;
-    // int frame_cnt = 0;
     std::mutex cout_guard;
-    // void do_loadvideo(std::filesystem::path video_path){
-    // std::filesystem::path current_video_path;
-    // void do_loadvideo(){
-    //     cv::VideoCapture video;
-    //     video.open(current_video_path.string());
-    //     if (video.isOpened() == false)
-    //     {
-    //         throw std::runtime_error("Could not open the video file: " + current_video_path.string());
-    //     }
-    //     cv::Mat image;
-    //     video >> image;
-    //     width = image.cols;
-    //     height = image.rows;
-
-    //     cv::Mat old_image(image);
-    //     while(true)
-    //     {
-    //         video >> image;
-    //         bool end_flag = false;
-    //         if (image.empty()) {
-    //             end_flag = true;
-    //         }
-    //         loadvideo_fifo.write(no_abnormality, end_flag, [&](LoadVideoFIFOElementType& dst) -> void {
-    //             dst = old_image;
-    //         });
-    //         frame_cnt++;
-
-    //         if (end_flag) break;
-    //         old_image = image;
-    //     }
-    // }
     std::map<size_t, std::vector<byte_track::Object>> json_inputs_car;
     std::map<size_t, std::vector<byte_track::Object>> json_inputs_pedestrian;
 
     #ifdef DPU
     std::shared_ptr<YoloRunner> yolorunner;
     #endif
+    std::string runmode;
     float inference_time_sum = 0.0f;
     void do_inference(){
-        // bool end_flag = false;
-        int frame_idx = 0;
-        // while (!end_flag) {
-        //     cv::Mat img;
-        //     loadvideo_fifo.read(no_abnormality, [&](const LoadVideoFIFOElementType& src) -> void {
-        //         img = src;
-        //     });
-        for(int i = 0; i < (int)video_images.size(); i++)
+        for(size_t frame_idx = 0; frame_idx < video_images.size(); frame_idx++)
         {
-            cv::Mat img = video_images[i];
-            bool end_flag = (i == ((int)video_images.size() - 1));
+            cv::Mat img = video_images[frame_idx];
+            bool end_flag = (frame_idx == (video_images.size() - 1));
             std::chrono::system_clock::time_point t_start, t_end;
             t_start = std::chrono::system_clock::now();
-            #ifdef DPU
-            auto detection_results = yolorunner->Run(img);
-            #else
-            std::vector<std::vector<byte_track::Object>> detection_results = {json_inputs_car[frame_idx], json_inputs_pedestrian[frame_idx]};
-            #endif
-            frame_idx++;
+            std::vector<std::vector<byte_track::Object>> detection_results;
+            if (runmode == "json")
             {
-                // std::lock_guard<std::mutex> lock_cout(cout_guard);
-                // std::cout << "inference " << frame_idx << std::endl;
+                detection_results = {json_inputs_car[frame_idx], json_inputs_pedestrian[frame_idx]};
+            } else if (runmode == "dpu")
+            {
+                #ifdef DPU
+                detection_results = yolorunner->Run(img);
+                #else
+                #endif
             }
-            // end_flag = loadvideo_fifo.neverReadNextElement();
             t_end = std::chrono::system_clock::now();
             inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
             inference_fifo.write(no_abnormality, end_flag, [&](InferenceFIFOElementType& dst) -> void {
@@ -281,11 +236,6 @@ namespace
             copy_results(pedestrian_tracker->update(detection_results[1], fp), outputs_pedestrian);
             t_end = std::chrono::system_clock::now();
             tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
-            // {
-            //     std::lock_guard<std::mutex> lock_cout(cout_guard);
-            //     std::cout << "outputs_car " << outputs_car.size() << std::endl;
-            // }
-
         }
     }
 
@@ -379,7 +329,7 @@ int main(int argc, char *argv[])
         if(argc < 3) throw std::runtime_error(usage);
 
         std::filesystem::path video_path(argv[1]);
-        std::string runmode = std::string(argv[2]);
+        runmode = std::string(argv[2]);
         #ifndef DPU
         if(runmode == "dpu") throw std::runtime_error("build app with -DDPU=ON");
         #endif
@@ -408,11 +358,13 @@ int main(int argc, char *argv[])
         video >> image;
         int width = image.cols;
         int height = image.rows;
-        while(true){
+        std::cout << "Loading images from video..." << std::endl;
+        while(true)
+        {
             if (image.empty()) break;
+            video_images.push_back(image.clone());
             video >> image;
             frame_cnt++;
-            video_images.push_back(image);
         }
         video.release();
 
@@ -442,8 +394,7 @@ int main(int argc, char *argv[])
         #endif
 
 
-        //Thread start
-        // loadvideo_fifo.init();
+        std::cout << "Start detection and tracking" << std::endl;
         inference_fifo.init();
         std::cout << video_path.filename() << std::endl;
 
@@ -458,19 +409,12 @@ int main(int argc, char *argv[])
 
         std::chrono::system_clock::time_point t_start, t_end;
         t_start = std::chrono::system_clock::now();
-
-
-        // auto loadvideo  = std::thread(gen_func([&]() -> void { do_loadvideo(); }));
         auto inference   = std::thread(gen_func([&]() -> void { do_inference(); }));
         auto tracking = std::thread(gen_func([&]() -> void { do_tracking(); }));
-        // std::cout << "OK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! " << std::endl;
-        // loadvideo.join();
         inference.join();
         tracking.join();
-
-        std::cout << "OK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! " << frame_cnt << std::endl;
-
         t_end = std::chrono::system_clock::now();
+
         float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
         std::map<std::string, float> time_summary = {
             {"inference", inference_time_sum/(float)frame_cnt},
@@ -481,104 +425,6 @@ int main(int argc, char *argv[])
         timefile.open((std::string)"time_summary_" + (std::string)video_path.stem() + (std::string)".json");
         timefile << json11::Json(time_summary).dump();
         timefile.close();
-
-
-
-        // Get detection results
-
-
-        // std::vector<cv::Mat> draw_images;
-        // std::vector<std::vector<byte_track::STrack>> outputs_car;
-        // std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
-        // cv::VideoCapture video;
-        // video.open(video_path.string());
-        // if (video.isOpened() == false)
-        // {
-        //     throw std::runtime_error("Could not open the video file: " + video_path.string());
-        // }
-
-        // const auto copy_results = [](const auto tracker_outputs, auto &outputs) -> void
-        // {
-        //     outputs.emplace_back();
-        //     for (const auto &tracker_output : tracker_outputs)
-        //     {
-        //         // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
-        //         outputs.back().push_back(*tracker_output.get());
-        //     }
-        // };
-
-        // cv::Mat image;
-        // video >> image;
-        // if (image.empty())
-        // {
-        //     throw std::runtime_error("The input video is empty.");
-        // }
-
-        // const size_t width = image.cols;
-        // const size_t height = image.rows;
-
-        // std::chrono::system_clock::time_point t_start, t_end, t1, t2, t3;
-        // float inference_time_sum = 0.0f;
-        // float tracking_time_sum = 0.0f;
-        // int frame_cnt = 0;
-        // t_start = std::chrono::system_clock::now();
-        // if (runmode == "json")
-        // {
-        //     std::filesystem::path jsondir(argv[3]);
-        //     auto json_inputs_car = read_json(jsondir, video_basename, 0, width, height);
-        //     auto json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height);
-
-        //     while (true)
-        //     {
-        //         if (image.empty())
-        //             break;
-        //         frame_cnt++;
-        //         // draw_images.push_back(images[fi].clone());
-        //         t2 = std::chrono::system_clock::now();
-        //         byte_track::FeatureProvider fp(image);
-        //         copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
-        //         copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
-        //         t3 = std::chrono::system_clock::now();
-        //         tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
-        //         video >> image;
-        //     }
-        // }
-        // else if (runmode == "dpu")
-        // {
-        //     #ifdef DPU
-        //     while (true)
-        //     {
-        //         if (image.empty())
-        //             break;
-        //         frame_cnt++;
-        //         // draw_images.push_back(images[fi].clone());
-        //         t1 = std::chrono::system_clock::now();
-        //         auto detection_results = yolorunner->Run(image);
-        //         t2 = std::chrono::system_clock::now();
-        //         byte_track::FeatureProvider fp(image);
-        //         copy_results(car_tracker.update(detection_results[0], fp), outputs_car);
-        //         copy_results(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
-        //         t3 = std::chrono::system_clock::now();
-        //         inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
-        //         tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
-        //         video >> image;
-        //     }
-        //     #endif
-        // }
-        // t_end = std::chrono::system_clock::now();
-        // float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
-        // video.release();
-
-        // // output time summary
-        // std::map<std::string, float> time_summary = {
-        //     {"inference", inference_time_sum/(float)frame_cnt},
-        //     {"tracking", tracking_time_sum/(float)frame_cnt},
-        //     {"all", all_time}
-        // };
-        // std::ofstream timefile;
-        // timefile.open((std::string)"time_summary_" + (std::string)video_path.stem() + (std::string)".json");
-        // timefile << json11::Json(time_summary).dump();
-        // timefile.close();
 
         // Results: vector of vector{track_id, rect}, and the idx means frame_id
         using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;
@@ -651,7 +497,6 @@ int main(int argc, char *argv[])
             gen_objs_pt_and_draw_rect(results_pedestrian, "Pedestrian");
             frame_objects.push_back(json11::Json(objs_for_category_map));
         }
-        // frame_objects_map[video_path.filename().string()] = json11::Json(frame_objects);
         std::ofstream file;
         file.open((std::string)"prediction_" + (std::string)video_path.stem() + (std::string)".json");
         file << json11::Json(frame_objects).dump();
