@@ -8,7 +8,7 @@ function exit_with_invalid_args () {
 
 function build () {
     mkdir -p $1/build && cd $1/build
-    cmake ..
+    cmake .. $2
     make -j
     cd $1
 }
@@ -28,15 +28,15 @@ if [ $mode == "json" ]; then
     if [ $# -ne 4 ]; then
         exit_with_invalid_args
     fi
-    build $script_dir
+    build $script_dir ""
     for video in $video_list; do
         $script_dir/build/generate_submit_file $video $mode $4
     done
 elif [ $mode == "dpu" ]; then
-    if [ $# -ne 6 ]; then
+    if [ $# -ne 5 ]; then
         exit_with_invalid_args
     fi
-    build $script_dir
+    build $script_dir "-DRISCV=ON -DDPU=ON"
     for video in $video_list; do
         $script_dir/build/generate_submit_file $video $mode $4 $5
     done
