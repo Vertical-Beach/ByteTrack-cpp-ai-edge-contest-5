@@ -4,6 +4,7 @@
 
 #include "json11/json11.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <regex>
 
@@ -168,7 +169,11 @@ int main(int argc, char *argv[])
         const size_t width = image.cols;
         const size_t height = image.rows;
 
+        std::chrono::system_clock::time_point t_start, t_end, t1, t2, t3;
+        float inference_time_sum = 0.0f;
+        float tracking_time_sum = 0.0f;
         int frame_cnt = 0;
+        t_start = std::chrono::system_clock::now();
         if (runmode == "json")
         {
             std::filesystem::path jsondir(argv[3]);
@@ -181,9 +186,12 @@ int main(int argc, char *argv[])
                     break;
                 frame_cnt++;
                 // draw_images.push_back(images[fi].clone());
+                t2 = std::chrono::system_clock::now();
                 byte_track::FeatureProvider fp(image);
                 copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
                 copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
+                t3 = std::chrono::system_clock::now();
+                tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
                 video >> image;
             }
         }
@@ -196,16 +204,33 @@ int main(int argc, char *argv[])
                     break;
                 frame_cnt++;
                 // draw_images.push_back(images[fi].clone());
-                byte_track::FeatureProvider fp(image);
+                t1 = std::chrono::system_clock::now();
                 auto detection_results = yolorunner->Run(image);
+                t2 = std::chrono::system_clock::now();
+                byte_track::FeatureProvider fp(image);
                 copy_results(car_tracker.update(detection_results[0], fp), outputs_car);
                 copy_results(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
+                t3 = std::chrono::system_clock::now();
+                inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
+                tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
                 video >> image;
             }
             #endif
         }
-
+        t_end = std::chrono::system_clock::now();
+        float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
         video.release();
+
+        // output time summary
+        std::map<std::string, float> time_summary = {
+            {"inference", inference_time_sum/(float)frame_cnt},
+            {"tracking", tracking_time_sum/(float)frame_cnt},
+            {"all", all_time}
+        };
+        std::ofstream timefile;
+        timefile.open((std::string)"time_summary_" + (std::string)video_path.stem() + (std::string)".json");
+        timefile << json11::Json(time_summary).dump();
+        timefile.close();
 
         // Results: vector of vector{track_id, rect}, and the idx means frame_id
         using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;
