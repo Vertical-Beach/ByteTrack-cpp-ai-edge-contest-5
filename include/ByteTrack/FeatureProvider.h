@@ -34,6 +34,8 @@ public:
 
     const cv::Mat& getScaledImage() const;
 
+    const Cfg& getCfg() const;
+
     size_t getImageWidth() const;
     size_t getImageHeight() const;
 

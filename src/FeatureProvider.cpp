@@ -23,6 +23,11 @@ const cv::Mat& byte_track::FeatureProvider::getScaledImage() const
     return image_;
 }
 
+const byte_track::FeatureProviderCfg& byte_track::FeatureProvider::getCfg() const
+{
+    return cfg_;
+}
+
 size_t byte_track::FeatureProvider::getImageWidth() const
 {
     return original_size_.width;
