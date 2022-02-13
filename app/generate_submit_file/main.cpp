@@ -117,6 +117,64 @@ int main(int argc, char *argv[])
         }
         #endif
 
+        byte_track::BYTETrackerCfg car_cfg;
+        car_cfg.len_lost_time = 5;
+        car_cfg.track_thr = 0.75f;
+        car_cfg.high_thr = 0.8f;
+        car_cfg.first_match_thr = 0.8f;
+        car_cfg.second_match_thr = 0.5f;
+        car_cfg.unconfirmed_match_thr = 0.7f;
+        car_cfg.max_area_retio = 2.0f;
+        car_cfg.min_appearance_cost = 0.4f;
+        car_cfg.min_appearance_cost_for_lost_track = 0.2f;
+        car_cfg.min_appearance_cost_for_stray_rect = 0.1f;
+        car_cfg.max_len_dist_cost = 5;
+        car_cfg.max_len_appearance_cost = 1;
+        car_cfg.start_cost_dist_cost = 0.9f;
+        car_cfg.start_cost_appearance_cost = 0.5f;
+        car_cfg.step_dist_cost = 0.1f;
+        car_cfg.step_appearance_cost = 0.0f;
+        car_cfg.appearance_rect_h_padding_ratio = 0.0f;
+        car_cfg.appearance_rect_v_padding_ratio = 0.0f;
+        car_cfg.appearance_block_h_size = 1;
+        car_cfg.appearance_block_v_size = 3;
+        car_cfg.appearance_lbp_weight = 0.3f;
+        car_cfg.appearance_hue_weight = 0.5f;
+        car_cfg.appearance_saturation_weight = 0.2f;
+        car_cfg.dist_cost_max_pix = 200.0f;
+
+        byte_track::BYTETrackerCfg pedestrian_cfg;
+        pedestrian_cfg.len_lost_time = 5;
+        pedestrian_cfg.track_thr = 0.75f;
+        pedestrian_cfg.high_thr = 0.8f;
+        pedestrian_cfg.first_match_thr = 0.9f;
+        pedestrian_cfg.second_match_thr = 0.5f;
+        pedestrian_cfg.unconfirmed_match_thr = 0.7f;
+        pedestrian_cfg.max_area_retio = 1.5f;
+        pedestrian_cfg.min_appearance_cost = 0.3f;
+        pedestrian_cfg.min_appearance_cost_for_lost_track = 0.15f;
+        pedestrian_cfg.min_appearance_cost_for_stray_rect = 0.08f;
+        pedestrian_cfg.max_len_dist_cost = 5;
+        pedestrian_cfg.max_len_appearance_cost = 1;
+        pedestrian_cfg.start_cost_dist_cost = 0.9f;
+        pedestrian_cfg.start_cost_appearance_cost = 0.5f;
+        pedestrian_cfg.step_dist_cost = 0.1f;
+        pedestrian_cfg.step_appearance_cost = 0.0f;
+        pedestrian_cfg.appearance_rect_h_padding_ratio = 0.2f;
+        pedestrian_cfg.appearance_rect_v_padding_ratio = 0.1f;
+        pedestrian_cfg.appearance_block_h_size = 1;
+        pedestrian_cfg.appearance_block_v_size = 3;
+        pedestrian_cfg.appearance_lbp_weight = 0.5f;
+        pedestrian_cfg.appearance_hue_weight = 0.4f;
+        pedestrian_cfg.appearance_saturation_weight = 0.1f;
+        pedestrian_cfg.dist_cost_max_pix = 200.0f;
+
+        byte_track::FeatureProviderCfg fp_cfg;
+        fp_cfg.scale = 0.4f;
+        fp_cfg.n_lbp_feature_hist_bins = 10;
+        fp_cfg.n_hue_hist_bins = 10;
+        fp_cfg.n_saturation_hist_bins = 10;
+
         // Get detection results
         #ifdef RISCV
         int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
@@ -129,12 +187,12 @@ int main(int argc, char *argv[])
         }
         //write instruction
         riscv_imm(riscv_imem_base);
-        auto car_tracker = byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base);
-        auto pedestrian_tracker = byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base);
+        auto car_tracker = byte_track::BYTETracker(riscv_dmem_base, car_cfg);
+        auto pedestrian_tracker = byte_track::BYTETracker(riscv_dmem_base, pedestrian_cfg);
         #else
         // Execute tracking
-        auto car_tracker = byte_track::BYTETracker();
-        auto pedestrian_tracker = byte_track::BYTETracker();
+        auto car_tracker = byte_track::BYTETracker(car_cfg);
+        auto pedestrian_tracker = byte_track::BYTETracker(pedestrian_cfg);
         #endif
 
 
@@ -180,8 +238,8 @@ int main(int argc, char *argv[])
                 if (image.empty())
                     break;
                 frame_cnt++;
-                // draw_images.push_back(images[fi].clone());
-                byte_track::FeatureProvider fp(image);
+                // draw_images.push_back(image.clone());
+                byte_track::FeatureProvider fp(image, fp_cfg);
                 copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
                 copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
                 video >> image;
@@ -195,8 +253,8 @@ int main(int argc, char *argv[])
                 if (image.empty())
                     break;
                 frame_cnt++;
-                // draw_images.push_back(images[fi].clone());
-                byte_track::FeatureProvider fp(image);
+                // draw_images.push_back(image.clone());
+                byte_track::FeatureProvider fp(image, fp_cfg);
                 auto detection_results = yolorunner->Run(image);
                 copy_results(car_tracker.update(detection_results[0], fp), outputs_car);
                 copy_results(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
@@ -283,6 +341,8 @@ int main(int argc, char *argv[])
         file.open((std::string)"prediction_" + (std::string)video_path.stem() + (std::string)".json");
         file << json11::Json(frame_objects).dump();
         file.close();
+
+        // write_video(draw_images, (std::string)"./" + (std::string)video_path.stem() + (std::string)".mp4", 5);
     }
     catch (const std::exception &e)
     {
