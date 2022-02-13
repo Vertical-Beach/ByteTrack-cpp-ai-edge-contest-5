@@ -20,7 +20,13 @@ class STrack
 public:
     using FeatureProviderPtr = std::shared_ptr<FeatureProvider>;
 
-    STrack(const Rect<float>& rect, const float& score, const FeatureProviderPtr &fp_ptr);
+    STrack(const Rect<float>& rect,
+           const float& score,
+           const FeatureProviderPtr &fp_ptr,
+           const float &rect_h_padding_ratio = 0.0f,
+           const float &rect_v_padding_ratio = 0.0f,
+           const size_t &block_h_size = 1,
+           const size_t &block_v_size = 1);
     ~STrack();
 
     const KalmanFilter::StateMean& getKFStateMean() const;
@@ -50,7 +56,14 @@ public:
     void markAsLost();
     void markAsRemoved();
 
+    void updateFeature();
+
 private:
+    const float rect_h_padding_ratio_;
+    const float rect_v_padding_ratio_;
+    const size_t block_h_size_;
+    const size_t block_v_size_;
+
     KalmanFilter kalman_filter_;
     KalmanFilter::StateMean mean_;
     KalmanFilter::StateCov covariance_;

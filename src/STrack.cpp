@@ -1,6 +1,16 @@
 #include <ByteTrack/STrack.h>
 
-byte_track::STrack::STrack(const Rect<float>& rect, const float& score, const FeatureProviderPtr &fp_ptr) :
+byte_track::STrack::STrack(const Rect<float>& rect,
+                           const float& score,
+                           const FeatureProviderPtr &fp_ptr,
+                           const float &rect_h_padding_ratio,
+                           const float &rect_v_padding_ratio,
+                           const size_t &block_h_size,
+                           const size_t &block_v_size) :
+    rect_h_padding_ratio_(rect_h_padding_ratio),
+    rect_v_padding_ratio_(rect_v_padding_ratio),
+    block_h_size_(block_h_size),
+    block_v_size_(block_v_size),
     kalman_filter_(),
     mean_(),
     covariance_(),
@@ -14,10 +24,12 @@ byte_track::STrack::STrack(const Rect<float>& rect, const float& score, const Fe
     start_frame_id_(0),
     tracklet_len_(0)
 {
-    lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
-    const auto [hue_feature, saturation_feature] = fp_ptr_->getColorFeature(rect_);
-    hue_feature_ = std::move(hue_feature);
-    saturation_feature_ = std::move(saturation_feature);
+    const auto &fp_cfg = fp_ptr->getCfg();
+    const auto feature_block_size = block_v_size_ * block_h_size_;
+    lbp_feature_ = std::vector<float>(fp_cfg.n_lbp_feature_hist_bins * feature_block_size, 0);
+    hue_feature_ = std::vector<float>(fp_cfg.n_hue_hist_bins * feature_block_size, 0);
+    saturation_feature_ = std::vector<float>(fp_cfg.n_saturation_hist_bins * feature_block_size, 0);
+    updateFeature();
 }
 
 byte_track::STrack::~STrack()
@@ -170,12 +182,56 @@ void byte_track::STrack::updateRect(const bool &update_feature)
     rect_.height() = mean_[3];
     rect_.x() = mean_[0] - rect_.width() / 2;
     rect_.y() = mean_[1] - rect_.height() / 2;
-
     if (update_feature)
     {
-        lbp_feature_ = fp_ptr_->getLbpFeature(rect_);
-        const auto [hue_feature, saturation_feature] = fp_ptr_->getColorFeature(rect_);
-        hue_feature_ = std::move(hue_feature);
-        saturation_feature_ = std::move(saturation_feature);
+        updateFeature();
+    }
+}
+
+void byte_track::STrack::updateFeature()
+{
+    const auto valid_rect = Rect<float>(
+        rect_.x() + rect_.width() * rect_h_padding_ratio_,
+        rect_.y() + rect_.height() * rect_v_padding_ratio_,
+        rect_.width() * (1 - rect_h_padding_ratio_ - rect_h_padding_ratio_),
+        rect_.height() * (1 - rect_v_padding_ratio_ - rect_v_padding_ratio_)
+    );
+    const auto block_width = valid_rect.width() / block_h_size_;
+    const auto block_height = valid_rect.height() / block_v_size_;
+
+    std::vector<Rect<float>> blocks;
+    for (size_t ri = 0; ri < block_v_size_; ri++)
+    {
+        for (size_t ci = 0; ci < block_h_size_; ci++)
+        {
+            blocks.emplace_back(
+                rect_.x() + ci * block_width,
+                rect_.y() + ri * block_height,
+                block_width,
+                block_height
+            );
+        }
+    }
+
+    auto lbp_feature_itr = lbp_feature_.begin();
+    auto hue_feature_itr = hue_feature_.begin();
+    auto saturation_feature_itr = saturation_feature_.begin();
+    for (const auto &block : blocks)
+    {
+        const auto update_feature = [](auto &features_itr, const auto &features) -> void
+        {
+            for (const auto &feature : features)
+            {
+                *features_itr = (feature + *features_itr) / 2;
+                features_itr++;
+            }
+        };
+
+        const auto block_lbp_feature = fp_ptr_->getLbpFeature(block);
+        update_feature(lbp_feature_itr, block_lbp_feature);
+
+        const auto [block_hue_feature, block_saturation_feature] = fp_ptr_->getColorFeature(block);
+        update_feature(hue_feature_itr, block_hue_feature);
+        update_feature(saturation_feature_itr, block_saturation_feature);
     }
 }
