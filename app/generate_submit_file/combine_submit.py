@@ -1,12 +1,20 @@
 import json
-import os
+import sys
+import glob
 
 resmap = {}
-for i in range(74):
-    videoname = f"test_{str(i).zfill(2)}.mp4"
-    print(videoname)
-    videores = json.loads(open(f"./build/prediction_test_{str(i).zfill(2)}.json").read())
-    assert(len(videores) == 150)
-    resmap[videoname] = videores
+args = sys.argv
+if len(args) != 2:
+    print("Usage: $ python3 combine_submit.py <video name prefix>")
+else:
+    video_name_prefix = args[1]
+    prediction_files = glob.glob("prediction_" + video_name_prefix + "*.json")
+    for file in prediction_files:
+        video_idx = file[-7:]
+        video_idx = video_idx[:2]
+        videoname = f"{video_name_prefix}_{video_idx}.mp4"
+        print(videoname)
+        videores = json.loads(open(f"./prediction_{video_name_prefix}_{video_idx}.json").read())
+        resmap[videoname] = videores
 
 open("predictions.json", "w").write(json.dumps(resmap))
