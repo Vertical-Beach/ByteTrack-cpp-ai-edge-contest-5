@@ -7,9 +7,288 @@
 #include <chrono>
 #include <filesystem>
 #include <regex>
+#include <functional>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <vector>
+
+#ifdef RISCV
+#include <sys/mman.h>
+#include <fcntl.h>
+#include "riscv_imm.h"
+#endif
+#ifdef DPU
+#include "yolo_runner.h"
+#endif
 
 namespace
 {
+    template<typename T>
+    class ObjWithMtx {
+    public:
+        T obj;
+
+        ObjWithMtx() = default;
+        ObjWithMtx(const T& _obj) : obj(_obj) {}
+
+        void operator =(const ObjWithMtx& obj) = delete;
+        ObjWithMtx(const ObjWithMtx& obj) = delete;
+
+        void lock() { mtx_.lock(); }
+        bool try_lock() { return mtx_.try_lock(); }
+        void unlock() { mtx_.unlock(); }
+
+    private:
+        std::mutex mtx_;
+    };
+
+    template<typename T, size_t D>
+    class MultiThreadFIFO {
+    public:
+        explicit MultiThreadFIFO(const uint32_t& sleep_t_us = 100) :
+            sleep_t_us_(sleep_t_us) {
+            init();
+        }
+
+        void operator =(const MultiThreadFIFO& obj) = delete;
+        MultiThreadFIFO(const MultiThreadFIFO& obj) = delete;
+
+        void init() {
+            std::unique_lock<std::mutex> lock_w_func(w_func_guard_, std::try_to_lock);
+            std::unique_lock<std::mutex> lock_r_func(r_func_guard_, std::try_to_lock);
+            if (!lock_w_func.owns_lock() || !lock_r_func.owns_lock()) {
+                throw std::runtime_error("[ERROR] Initialization of the FIFO failed.");
+            }
+            for (auto& state : fifo_state_) {
+                std::lock_guard<ObjWithMtx<ElementState>> lock_state(state);
+                state.obj = ElementState::INVALID;
+            }
+            r_idx_ = 0;
+            w_idx_ = 0;
+        }
+
+        void write(ObjWithMtx<bool>& no_abnormality, const bool& is_last, std::function<void(T&)> write_func) {
+            std::unique_lock<std::mutex> lock_w_func(w_func_guard_, std::try_to_lock);
+            if (!lock_w_func.owns_lock()) {
+                throw std::runtime_error("[ERROR] The write function can't be called at the same time from multiple threads.");
+            }
+        while (true) {
+                {
+                    std::lock_guard<ObjWithMtx<ElementState>> lock_state(fifo_state_[w_idx_]);
+                    if (fifo_state_[w_idx_].obj == ElementState::INVALID) {
+                        break;
+                    } else {
+                        std::lock_guard<ObjWithMtx<bool>> lock(no_abnormality);
+                        if (no_abnormality.obj == false) {
+                            throw std::runtime_error("[ERROR] Terminate write process.");
+                        }
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::microseconds(sleep_t_us_));
+            }
+            {
+                std::lock_guard<ObjWithMtx<T>> lock_fifo(fifo_[w_idx_]);
+                write_func(fifo_[w_idx_].obj);
+            }
+            {
+                std::lock_guard<ObjWithMtx<ElementState>> lock_state(fifo_state_[w_idx_]);
+                fifo_state_[w_idx_].obj = is_last ? ElementState::VALID_LAST : ElementState::VALID;
+            }
+            incrementIdx(w_idx_);
+        }
+
+        void read(ObjWithMtx<bool>& no_abnormality, std::function<void(const T&)> read_func) {
+            std::unique_lock<std::mutex> lock_r_func(r_func_guard_, std::try_to_lock);
+            if (!lock_r_func.owns_lock()) {
+                throw std::runtime_error("[ERROR] The read function can't be called at the same time from multiple threads.");
+            }
+            while (true) {
+                {
+                    std::lock_guard<ObjWithMtx<ElementState>> lock_state(fifo_state_[r_idx_]);
+                    if (fifo_state_[r_idx_].obj == ElementState::VALID ||
+                        fifo_state_[r_idx_].obj == ElementState::VALID_LAST) {
+                        break;
+                    } else {
+                        std::lock_guard<ObjWithMtx<bool>> lock(no_abnormality);
+                        if (no_abnormality.obj == false) {
+                            throw std::runtime_error("[ERROR] Terminate read process.");
+                        }
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::microseconds(sleep_t_us_));
+            }
+            {
+                std::lock_guard<ObjWithMtx<T>> lock_fifo(fifo_[r_idx_]);
+                read_func(fifo_[r_idx_].obj);
+            }
+            {
+                std::lock_guard<ObjWithMtx<ElementState>> lock_state(fifo_state_[r_idx_]);
+                if (fifo_state_[r_idx_].obj == ElementState::VALID) {
+                    fifo_state_[r_idx_].obj = ElementState::INVALID;
+                    incrementIdx(r_idx_);
+                } else {
+                    fifo_state_[r_idx_].obj = ElementState::INVALID_LAST;
+                }
+            }
+        }
+
+        bool neverReadNextElement() {
+            std::unique_lock<std::mutex> lock_r_func(r_func_guard_, std::try_to_lock);
+            if (!lock_r_func.owns_lock()) {
+                throw std::runtime_error("[ERROR] The read function can't be called at the same time from multiple threads.");
+            }
+            std::lock_guard<ObjWithMtx<ElementState>> lock_state(fifo_state_[r_idx_]);
+            return (fifo_state_[r_idx_].obj == ElementState::INVALID_LAST);
+        }
+
+    private:
+        enum class ElementState { VALID, VALID_LAST, INVALID, INVALID_LAST };
+
+        void incrementIdx(size_t& idx) const {
+            idx = (idx < D - 1) ? idx + 1 : 0;
+        }
+
+        const uint32_t sleep_t_us_;
+
+        std::array<ObjWithMtx<T>, D> fifo_;
+        std::array<ObjWithMtx<ElementState>, D> fifo_state_;
+        std::mutex r_func_guard_, w_func_guard_;
+        size_t r_idx_{0}, w_idx_{0};
+    };
+    ObjWithMtx<bool> no_abnormality(true);
+    // using LoadVideoFIFOElementType  = cv::Mat;
+    using InferenceFIFOElementType = std::pair<cv::Mat, std::vector<std::vector<byte_track::Object>>>;
+    // using PostprocFIFOElementType = std::array<int8_t, DPU_OUTPUT_IMG_WIDTH * DPU_OUTPUT_IMG_HEIGHT * DPU_OUTPUT_NOF_CLASS>;
+    // constexpr auto LoadVideoFIFO_DEPTH = 30U;
+    constexpr auto InferenceFIFO_DEPTH = 30U;
+    constexpr auto SLEEP_T_US = 100U;
+    // MultiThreadFIFO<LoadVideoFIFOElementType, LoadVideoFIFO_DEPTH> loadvideo_fifo(SLEEP_T_US);
+    std::vector<cv::Mat> video_images;
+    MultiThreadFIFO<InferenceFIFOElementType, InferenceFIFO_DEPTH> inference_fifo(SLEEP_T_US);
+    // MultiThreadFIFO<PostprocFIFOElementType, POSTPROC_FIFO_DEPTH> postproc_fifo(SLEEP_T_US);
+    // int width = 0;
+    // int height = 0;
+    // int frame_cnt = 0;
+    std::mutex cout_guard;
+    // void do_loadvideo(std::filesystem::path video_path){
+    // std::filesystem::path current_video_path;
+    // void do_loadvideo(){
+    //     cv::VideoCapture video;
+    //     video.open(current_video_path.string());
+    //     if (video.isOpened() == false)
+    //     {
+    //         throw std::runtime_error("Could not open the video file: " + current_video_path.string());
+    //     }
+    //     cv::Mat image;
+    //     video >> image;
+    //     width = image.cols;
+    //     height = image.rows;
+
+    //     cv::Mat old_image(image);
+    //     while(true)
+    //     {
+    //         video >> image;
+    //         bool end_flag = false;
+    //         if (image.empty()) {
+    //             end_flag = true;
+    //         }
+    //         loadvideo_fifo.write(no_abnormality, end_flag, [&](LoadVideoFIFOElementType& dst) -> void {
+    //             dst = old_image;
+    //         });
+    //         frame_cnt++;
+
+    //         if (end_flag) break;
+    //         old_image = image;
+    //     }
+    // }
+    std::map<size_t, std::vector<byte_track::Object>> json_inputs_car;
+    std::map<size_t, std::vector<byte_track::Object>> json_inputs_pedestrian;
+
+    #ifdef DPU
+    std::shared_ptr<YoloRunner> yolorunner;
+    #endif
+    float inference_time_sum = 0.0f;
+    void do_inference(){
+        // bool end_flag = false;
+        int frame_idx = 0;
+        // while (!end_flag) {
+        //     cv::Mat img;
+        //     loadvideo_fifo.read(no_abnormality, [&](const LoadVideoFIFOElementType& src) -> void {
+        //         img = src;
+        //     });
+        for(int i = 0; i < (int)video_images.size(); i++)
+        {
+            cv::Mat img = video_images[i];
+            bool end_flag = (i == ((int)video_images.size() - 1));
+            std::chrono::system_clock::time_point t_start, t_end;
+            t_start = std::chrono::system_clock::now();
+            #ifdef DPU
+            auto detection_results = yolorunner->Run(img);
+            #else
+            std::vector<std::vector<byte_track::Object>> detection_results = {json_inputs_car[frame_idx], json_inputs_pedestrian[frame_idx]};
+            #endif
+            frame_idx++;
+            {
+                // std::lock_guard<std::mutex> lock_cout(cout_guard);
+                // std::cout << "inference " << frame_idx << std::endl;
+            }
+            // end_flag = loadvideo_fifo.neverReadNextElement();
+            t_end = std::chrono::system_clock::now();
+            inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
+            inference_fifo.write(no_abnormality, end_flag, [&](InferenceFIFOElementType& dst) -> void {
+                dst.first = img;
+                dst.second = detection_results;
+            });
+        }
+    }
+
+    std::vector<std::vector<byte_track::STrack>> outputs_car;
+    std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
+    std::shared_ptr<byte_track::BYTETracker> car_tracker;
+    std::shared_ptr<byte_track::BYTETracker> pedestrian_tracker;
+
+    float tracking_time_sum = 0.0f;
+    void do_tracking(){
+        bool end_flag = false;
+        int frame_idx = 0;
+
+        const auto copy_results = [](const auto tracker_outputs, auto &outputs) -> void
+        {
+            outputs.emplace_back();
+            for (const auto &tracker_output : tracker_outputs)
+            {
+                // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
+                outputs.back().push_back(*tracker_output.get());
+            }
+        };
+
+        while (!end_flag) {
+            cv::Mat img;
+            std::vector<std::vector<byte_track::Object>> detection_results;
+            inference_fifo.read(no_abnormality, [&](const InferenceFIFOElementType& src) -> void {
+                img = src.first;
+                detection_results = src.second;
+            });
+            // auto detection_results = yolorunner->Run(img);
+            frame_idx++;
+            end_flag = inference_fifo.neverReadNextElement();
+            std::chrono::system_clock::time_point t_start, t_end;
+            t_start = std::chrono::system_clock::now();
+            byte_track::FeatureProvider fp(img);
+            copy_results(car_tracker->update(detection_results[0], fp), outputs_car);
+            copy_results(pedestrian_tracker->update(detection_results[1], fp), outputs_pedestrian);
+            t_end = std::chrono::system_clock::now();
+            tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
+            // {
+            //     std::lock_guard<std::mutex> lock_cout(cout_guard);
+            //     std::cout << "outputs_car " << outputs_car.size() << std::endl;
+            // }
+
+        }
+    }
+
     void write_video(const std::vector<cv::Mat> &images, const std::filesystem::path &path, const size_t &fps)
     {
         if (images.size() == 0)
@@ -73,19 +352,28 @@ namespace
     }
 }
 
-#ifdef RISCV
-#include <sys/mman.h>
-#include <fcntl.h>
-#include "riscv_imm.h"
-#endif
-#ifdef DPU
-#include "yolo_runner.h"
-#endif
+
 
 int main(int argc, char *argv[])
 {
     try
     {
+        std::exception_ptr ep;
+        const auto gen_func = [&](const auto do_worker) -> auto {
+            return [&]() -> void {
+                try {
+                    do_worker();
+                }
+                catch(...) {
+                    std::lock_guard<ObjWithMtx<bool>> lock(no_abnormality);
+                    if (no_abnormality.obj) {
+                        no_abnormality.obj = false;
+                        ep = std::current_exception();
+                    }
+                }
+            };
+        };
+
         const std::string usage = "Usage1: $ ./generate_submit_file <video path> json <detection results path>\n"\
                 "Usage2: $ ./generate_submit_file <video path> dpu <modelconfig .prototxt> <modelfile .xmodel>";
         if(argc < 3) throw std::runtime_error(usage);
@@ -108,17 +396,33 @@ int main(int argc, char *argv[])
         std::cout << video_path.filename() << std::endl;
         const std::string video_basename = video_path.stem();
 
-        #ifdef DPU
-        std::shared_ptr<YoloRunner> yolorunner;
-        if(runmode == "dpu")
+        cv::VideoCapture video;
+        video.open(video_path.string());
+        if (video.isOpened() == false)
         {
-            char* configfile = argv[3];
-            char* modelfile = argv[4];
-            yolorunner = std::shared_ptr<YoloRunner>(new YoloRunner(configfile, modelfile));
+            throw std::runtime_error("Could not open the video file: " + video_path.string());
         }
-        #endif
 
-        // Get detection results
+        int frame_cnt = 0;
+        cv::Mat image;
+        video >> image;
+        int width = image.cols;
+        int height = image.rows;
+        while(true){
+            if (image.empty()) break;
+            video >> image;
+            frame_cnt++;
+            video_images.push_back(image);
+        }
+        video.release();
+
+        if (runmode == "json")
+        {
+            std::filesystem::path jsondir(argv[3]);
+            json_inputs_car = read_json(jsondir, video_basename, 0, width, height);
+            json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height);
+        }
+
         #ifdef RISCV
         int uio0_fd = open("/dev/uio0", O_RDWR | O_SYNC);
         volatile int* riscv_dmem_base = (int*) mmap(NULL, 0x20000, PROT_READ|PROT_WRITE, MAP_SHARED, uio0_fd, 0);
@@ -130,98 +434,44 @@ int main(int argc, char *argv[])
         }
         //write instruction
         riscv_imm(riscv_imem_base);
-        auto car_tracker = byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base);
-        auto pedestrian_tracker = byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base);
+        car_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base));
+        pedestrian_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base));
         #else
-        // Execute tracking
-        auto car_tracker = byte_track::BYTETracker();
-        auto pedestrian_tracker = byte_track::BYTETracker();
+        car_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker());
+        pedestrian_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker());
         #endif
 
 
-        // std::vector<cv::Mat> draw_images;
-        std::vector<std::vector<byte_track::STrack>> outputs_car;
-        std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
-        cv::VideoCapture video;
-        video.open(video_path.string());
-        if (video.isOpened() == false)
+        //Thread start
+        // loadvideo_fifo.init();
+        inference_fifo.init();
+        std::cout << video_path.filename() << std::endl;
+
+        #ifdef DPU
+        if(runmode == "dpu")
         {
-            throw std::runtime_error("Could not open the video file: " + video_path.string());
+            char* configfile = argv[3];
+            char* modelfile = argv[4];
+            yolorunner = std::shared_ptr<YoloRunner>(new YoloRunner(configfile, modelfile));
         }
+        #endif
 
-        const auto copy_results = [](const auto tracker_outputs, auto &outputs) -> void
-        {
-            outputs.emplace_back();
-            for (const auto &tracker_output : tracker_outputs)
-            {
-                // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
-                outputs.back().push_back(*tracker_output.get());
-            }
-        };
-
-        cv::Mat image;
-        video >> image;
-        if (image.empty())
-        {
-            throw std::runtime_error("The input video is empty.");
-        }
-
-        const size_t width = image.cols;
-        const size_t height = image.rows;
-
-        std::chrono::system_clock::time_point t_start, t_end, t1, t2, t3;
-        float inference_time_sum = 0.0f;
-        float tracking_time_sum = 0.0f;
-        int frame_cnt = 0;
+        std::chrono::system_clock::time_point t_start, t_end;
         t_start = std::chrono::system_clock::now();
-        if (runmode == "json")
-        {
-            std::filesystem::path jsondir(argv[3]);
-            auto json_inputs_car = read_json(jsondir, video_basename, 0, width, height);
-            auto json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height);
 
-            while (true)
-            {
-                if (image.empty())
-                    break;
-                frame_cnt++;
-                // draw_images.push_back(images[fi].clone());
-                t2 = std::chrono::system_clock::now();
-                byte_track::FeatureProvider fp(image);
-                copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
-                copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
-                t3 = std::chrono::system_clock::now();
-                tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
-                video >> image;
-            }
-        }
-        else if (runmode == "dpu")
-        {
-            #ifdef DPU
-            while (true)
-            {
-                if (image.empty())
-                    break;
-                frame_cnt++;
-                // draw_images.push_back(images[fi].clone());
-                t1 = std::chrono::system_clock::now();
-                auto detection_results = yolorunner->Run(image);
-                t2 = std::chrono::system_clock::now();
-                byte_track::FeatureProvider fp(image);
-                copy_results(car_tracker.update(detection_results[0], fp), outputs_car);
-                copy_results(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
-                t3 = std::chrono::system_clock::now();
-                inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
-                tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
-                video >> image;
-            }
-            #endif
-        }
+
+        // auto loadvideo  = std::thread(gen_func([&]() -> void { do_loadvideo(); }));
+        auto inference   = std::thread(gen_func([&]() -> void { do_inference(); }));
+        auto tracking = std::thread(gen_func([&]() -> void { do_tracking(); }));
+        // std::cout << "OK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! " << std::endl;
+        // loadvideo.join();
+        inference.join();
+        tracking.join();
+
+        std::cout << "OK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! " << frame_cnt << std::endl;
+
         t_end = std::chrono::system_clock::now();
         float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
-        video.release();
-
-        // output time summary
         std::map<std::string, float> time_summary = {
             {"inference", inference_time_sum/(float)frame_cnt},
             {"tracking", tracking_time_sum/(float)frame_cnt},
@@ -231,6 +481,104 @@ int main(int argc, char *argv[])
         timefile.open((std::string)"time_summary_" + (std::string)video_path.stem() + (std::string)".json");
         timefile << json11::Json(time_summary).dump();
         timefile.close();
+
+
+
+        // Get detection results
+
+
+        // std::vector<cv::Mat> draw_images;
+        // std::vector<std::vector<byte_track::STrack>> outputs_car;
+        // std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
+        // cv::VideoCapture video;
+        // video.open(video_path.string());
+        // if (video.isOpened() == false)
+        // {
+        //     throw std::runtime_error("Could not open the video file: " + video_path.string());
+        // }
+
+        // const auto copy_results = [](const auto tracker_outputs, auto &outputs) -> void
+        // {
+        //     outputs.emplace_back();
+        //     for (const auto &tracker_output : tracker_outputs)
+        //     {
+        //         // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
+        //         outputs.back().push_back(*tracker_output.get());
+        //     }
+        // };
+
+        // cv::Mat image;
+        // video >> image;
+        // if (image.empty())
+        // {
+        //     throw std::runtime_error("The input video is empty.");
+        // }
+
+        // const size_t width = image.cols;
+        // const size_t height = image.rows;
+
+        // std::chrono::system_clock::time_point t_start, t_end, t1, t2, t3;
+        // float inference_time_sum = 0.0f;
+        // float tracking_time_sum = 0.0f;
+        // int frame_cnt = 0;
+        // t_start = std::chrono::system_clock::now();
+        // if (runmode == "json")
+        // {
+        //     std::filesystem::path jsondir(argv[3]);
+        //     auto json_inputs_car = read_json(jsondir, video_basename, 0, width, height);
+        //     auto json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height);
+
+        //     while (true)
+        //     {
+        //         if (image.empty())
+        //             break;
+        //         frame_cnt++;
+        //         // draw_images.push_back(images[fi].clone());
+        //         t2 = std::chrono::system_clock::now();
+        //         byte_track::FeatureProvider fp(image);
+        //         copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
+        //         copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
+        //         t3 = std::chrono::system_clock::now();
+        //         tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
+        //         video >> image;
+        //     }
+        // }
+        // else if (runmode == "dpu")
+        // {
+        //     #ifdef DPU
+        //     while (true)
+        //     {
+        //         if (image.empty())
+        //             break;
+        //         frame_cnt++;
+        //         // draw_images.push_back(images[fi].clone());
+        //         t1 = std::chrono::system_clock::now();
+        //         auto detection_results = yolorunner->Run(image);
+        //         t2 = std::chrono::system_clock::now();
+        //         byte_track::FeatureProvider fp(image);
+        //         copy_results(car_tracker.update(detection_results[0], fp), outputs_car);
+        //         copy_results(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
+        //         t3 = std::chrono::system_clock::now();
+        //         inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
+        //         tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
+        //         video >> image;
+        //     }
+        //     #endif
+        // }
+        // t_end = std::chrono::system_clock::now();
+        // float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
+        // video.release();
+
+        // // output time summary
+        // std::map<std::string, float> time_summary = {
+        //     {"inference", inference_time_sum/(float)frame_cnt},
+        //     {"tracking", tracking_time_sum/(float)frame_cnt},
+        //     {"all", all_time}
+        // };
+        // std::ofstream timefile;
+        // timefile.open((std::string)"time_summary_" + (std::string)video_path.stem() + (std::string)".json");
+        // timefile << json11::Json(time_summary).dump();
+        // timefile.close();
 
         // Results: vector of vector{track_id, rect}, and the idx means frame_id
         using Results = std::vector<std::vector<std::pair<size_t, cv::Rect2i>>>;

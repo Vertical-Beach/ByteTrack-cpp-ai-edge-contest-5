@@ -31,6 +31,8 @@ if(NOT OpenCV_FOUND)
   message(FATAL_ERROR "OpenCV > 3.4.0 not found.")
 endif()
 
+find_package(Threads REQUIRED)
+
 set(BYTETRACK_DIR "${PROJECT_SOURCE_DIR}/../../")
 
 include_directories(
@@ -68,4 +70,5 @@ target_link_libraries(${PROJECT_NAME}
   ${EIGEN3_LIBS}
   ${OpenCV_LIBS}
   ${DPU_LIBS}
+  "-pthread"
   )
