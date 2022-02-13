@@ -40,16 +40,32 @@ include_directories(
   ${OpenCV_INCLUDE_DIR}
   )
 
+set(RISCV OFF CACHE BOOL "The flag whether to use riscv or not")
+if(RISCV)
+  message("Use RISCV")
+  add_definitions(-DRISCV)
+endif()
+
+set(DPU OFF CACHE BOOL "The flag whether to use dpu or not")
+if(DPU)
+  message("Use DPU")
+  add_definitions(-DDPU)
+  set(OpenCV_LIBS "-lopencv_core -lopencv_video -lopencv_videoio -lopencv_imgproc -lopencv_imgcodecs -lopencv_highgui")
+  set(DPU_LIBS "-lglog -lvitis_ai_library-xnnpp -lvitis_ai_library-model_config -lprotobuf -lvitis_ai_library-dpu_task")
+endif()
+
 link_directories(
     ${BYTETRACK_DIR}/build
     )
 
 add_executable(${PROJECT_NAME}
   ${PROJECT_SOURCE_DIR}/main.cpp
+  ${PROJECT_SOURCE_DIR}/json11/json11.cpp
   )
 
 target_link_libraries(${PROJECT_NAME}
   bytetrack
   ${EIGEN3_LIBS}
   ${OpenCV_LIBS}
+  ${DPU_LIBS}
   )

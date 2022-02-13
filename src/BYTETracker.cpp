@@ -1,11 +1,21 @@
 #include <ByteTrack/BYTETracker.h>
 
+#ifdef RISCV
+byte_track::BYTETracker::BYTETracker(volatile int* riscv_dmem_base, const Cfg &cfg) :
+    cfg_(cfg),
+    frame_id_(0),
+    track_id_count_(0),
+    riscv_dmem_base(riscv_dmem_base)
+{
+}
+#else
 byte_track::BYTETracker::BYTETracker(const Cfg &cfg) :
     cfg_(cfg),
     frame_id_(0),
     track_id_count_(0)
 {
 }
+#endif
 
 byte_track::BYTETracker::~BYTETracker()
 {
@@ -468,7 +478,7 @@ float byte_track::BYTETracker::calcCosSimilarity(const std::vector<float> &a, co
 {
     if (a.size() != b.size())
     {
-        throw std::runtime_error("The size of vectors are different in byte_track::BYTETracker::calcCosSimilarity(): a.size()" + 
+        throw std::runtime_error("The size of vectors are different in byte_track::BYTETracker::calcCosSimilarity(): a.size()" +
                                  std::to_string(a.size()) + ", b.size(): " + std::to_string(b.size()));
     }
 
@@ -791,10 +801,15 @@ double byte_track::BYTETracker::execLapjv(const std::vector<std::vector<float>> 
         }
     }
 
+
+    int ret;
     int* x_c = new int[sizeof(int) * n];
     int *y_c = new int[sizeof(int) * n];
-
-    int ret = lapjv_internal(n, cost_ptr, x_c, y_c);
+    #ifdef RISCV
+    ret = lapjv_internal(n, cost_ptr, x_c, y_c, riscv_dmem_base);
+    #else
+    ret = lapjv_internal(n, cost_ptr, x_c, y_c);
+    #endif
     if (ret != 0)
     {
         throw std::runtime_error("The result of lapjv_internal() is invalid.");

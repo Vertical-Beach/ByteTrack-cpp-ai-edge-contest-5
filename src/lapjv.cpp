@@ -4,6 +4,7 @@
 #define LAPJV_CPP_FREE(x) if (x != 0) { free(x); x = 0; }
 #define LAPJV_CPP_SWAP_INDICES(a, b) { int _temp_index = a; a = b; b = _temp_index; }
 
+#ifndef RISCV
 namespace
 {
 constexpr size_t LARGE = 1000000;
@@ -304,7 +305,6 @@ int _ca_dense(
     return 0;
 }
 }
-
 /** Solve dense sparse LAP. */
 int byte_track::lapjv_internal(
     const size_t n, double *cost[],
@@ -329,6 +329,97 @@ int byte_track::lapjv_internal(
     LAPJV_CPP_FREE(free_rows);
     return ret;
 }
+#else
+
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <cstring>
+
+int byte_track::reset_pl_resetn1(){
+	int fd;
+	char attr[32];
+
+	DIR *dir = opendir("/sys/class/gpio/gpio510");
+	if (!dir) {
+		fd = open("/sys/class/gpio/export", O_WRONLY);
+		if (fd < 0) {
+			perror("open(/sys/class/gpio/export)");
+			return -1;
+		}
+		strcpy(attr, "510");
+		write(fd, attr, strlen(attr));
+		close(fd);
+		dir = opendir("/sys/class/gpio/gpio510");
+		if (!dir) {
+			return -1;
+		}
+	}
+	closedir(dir);
+
+	fd = open("/sys/class/gpio/gpio510/direction", O_WRONLY);
+	if (fd < 0) {
+		perror("open(/sys/class/gpio/gpio510/direction)");
+		return -1;
+	}
+	strcpy(attr, "out");
+	write(fd, attr, strlen(attr));
+	close(fd);
+
+	fd = open("/sys/class/gpio/gpio510/value", O_WRONLY);
+	if (fd < 0) {
+		perror("open(/sys/class/gpio/gpio510/value)");
+		return -1;
+	}
+	sprintf(attr, "%d", 0);
+	write(fd, attr, strlen(attr));
+
+    sprintf(attr, "%d", 1);
+	write(fd, attr, strlen(attr));
+	close(fd);
+
+	return 0;
+}
+
+#define DMEM_OFFSET 1024*16
+#include <unistd.h>
+int byte_track::lapjv_internal(
+    const size_t _n, double *cost[],
+    int *x, int *y, volatile int* riscv_dmem_base)
+{
+    int n = (int)_n;
+    //set input
+    riscv_dmem_base[DMEM_OFFSET+0] = n;
+    volatile float* dmem_base_float = (volatile float*) riscv_dmem_base;
+    for(int i = 0; i < n; i++){
+        for(int j = 0; j < n; j++){
+            dmem_base_float[DMEM_OFFSET+i*n+j+1] = (float)(cost[i][j]);
+        }
+    }
+    //set incomplete flag
+    riscv_dmem_base[DMEM_OFFSET+(1+n*n+n*2)] = 0;
+    //reset riscv
+    reset_pl_resetn1();
+    //wait for completion
+    while(1){
+        bool endflag = riscv_dmem_base[DMEM_OFFSET+(1+n*n+n*2)] == n*2;
+        if(endflag) break;
+        usleep(1);
+    }
+    volatile int* riscv_x = &riscv_dmem_base[DMEM_OFFSET+1+n*n];
+    volatile int* riscv_y = &riscv_dmem_base[DMEM_OFFSET+1+n*n+n];
+    for(int i = 0; i < n; i++) x[i] = riscv_x[i];
+    for(int i = 0; i < n; i++) y[i] = riscv_y[i];
+    return 0;
+
+}
+#endif
 
 #undef LAPJV_CPP_NEW
 #undef LAPJV_CPP_FREE

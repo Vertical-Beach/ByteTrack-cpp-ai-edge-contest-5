@@ -48,7 +48,11 @@ public:
     using Cfg = BYTETrackerCfg;
     using STrackPtr = std::shared_ptr<STrack>;
 
+    #ifdef RISCV
+    explicit BYTETracker(volatile int* riscv_dmem_base = NULL, const Cfg &cfg = Cfg());
+    #else
     explicit BYTETracker(const Cfg &cfg = Cfg());
+    #endif
     ~BYTETracker();
 
     std::vector<STrackPtr> update(const std::vector<Object> &objects, const FeatureProvider &fp);
@@ -110,5 +114,8 @@ private:
     std::vector<STrackPtr> tracked_stracks_;
     std::vector<STrackPtr> lost_stracks_;
     std::vector<STrackPtr> removed_stracks_;
+    #ifdef RISCV
+    volatile int* riscv_dmem_base;
+    #endif
 };
 }
