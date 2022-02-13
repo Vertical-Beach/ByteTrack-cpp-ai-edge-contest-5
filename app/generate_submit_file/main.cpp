@@ -142,12 +142,31 @@ int main(int argc, char *argv[])
         // std::vector<cv::Mat> draw_images;
         std::vector<std::vector<byte_track::STrack>> outputs_car;
         std::vector<std::vector<byte_track::STrack>> outputs_pedestrian;
+        std::vector<cv::Mat> video_images;
         cv::VideoCapture video;
         video.open(video_path.string());
         if (video.isOpened() == false)
         {
             throw std::runtime_error("Could not open the video file: " + video_path.string());
         }
+        cv::Mat image;
+        video >> image;
+        if (image.empty())
+        {
+            throw std::runtime_error("The input video is empty.");
+        }
+        const size_t width = image.cols;
+        const size_t height = image.rows;
+        int frame_cnt = 0;
+        while(true)
+        {
+            if (image.empty()) break;
+            video_images.push_back(image);
+            video >> image;
+            frame_cnt++;
+        }
+
+
 
         const auto copy_results = [](const auto tracker_outputs, auto &outputs) -> void
         {
@@ -159,20 +178,11 @@ int main(int argc, char *argv[])
             }
         };
 
-        cv::Mat image;
-        video >> image;
-        if (image.empty())
-        {
-            throw std::runtime_error("The input video is empty.");
-        }
 
-        const size_t width = image.cols;
-        const size_t height = image.rows;
 
         std::chrono::system_clock::time_point t_start, t_end, t1, t2, t3;
         float inference_time_sum = 0.0f;
         float tracking_time_sum = 0.0f;
-        int frame_cnt = 0;
         t_start = std::chrono::system_clock::now();
         if (runmode == "json")
         {
@@ -180,30 +190,25 @@ int main(int argc, char *argv[])
             auto json_inputs_car = read_json(jsondir, video_basename, 0, width, height);
             auto json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height);
 
-            while (true)
+            for(size_t i = 0; i < video_images.size(); i++)
             {
-                if (image.empty())
-                    break;
-                frame_cnt++;
+                cv::Mat image = video_images[i];
                 // draw_images.push_back(images[fi].clone());
                 t2 = std::chrono::system_clock::now();
                 byte_track::FeatureProvider fp(image);
-                copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
-                copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
+                copy_results(car_tracker.update(json_inputs_car[i], fp), outputs_car);
+                copy_results(pedestrian_tracker.update(json_inputs_pedestrian[i], fp), outputs_pedestrian);
                 t3 = std::chrono::system_clock::now();
                 tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
-                video >> image;
             }
         }
         else if (runmode == "dpu")
         {
             #ifdef DPU
-            while (true)
+            for(size_t i = 0; i < video_images.size(); i++)
             {
-                if (image.empty())
-                    break;
-                frame_cnt++;
                 // draw_images.push_back(images[fi].clone());
+                cv::Mat image = video_images[i];
                 t1 = std::chrono::system_clock::now();
                 auto detection_results = yolorunner->Run(image);
                 t2 = std::chrono::system_clock::now();
@@ -213,13 +218,11 @@ int main(int argc, char *argv[])
                 t3 = std::chrono::system_clock::now();
                 inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
                 tracking_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
-                video >> image;
             }
             #endif
         }
         t_end = std::chrono::system_clock::now();
         float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
-        video.release();
 
         // output time summary
         std::map<std::string, float> time_summary = {
