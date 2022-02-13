@@ -12,5 +12,6 @@ namespace byte_track
 int lapjv_internal(const size_t n, double *cost[], int *x, int *y);
 #else
 int lapjv_internal(const size_t n, double *cost[], int *x, int *y, volatile int* riscv_dmem_base);
+int reset_pl_resetn1();
 #endif
 }
