@@ -9,37 +9,6 @@
 
 namespace
 {
-    // return [fps, width, height, num_frames]
-    std::tuple<int, int, int, int> get_video_info(const std::filesystem::path &path)
-    {
-        // cv::VideoCapture video;
-        // video.open(path.string());
-        // if (video.isOpened() == false)
-        // {
-        //     throw std::runtime_error("Could not open the video file: " + path.string());
-        // }
-        // const auto fps = video.get(cv::CAP_PROP_FPS);
-
-        // cv::Mat image;
-        // int num_frames = 0;
-        // int width = -1;;
-        // int height = -1;
-        // while(true)
-        // {
-        //     video >> image;
-        //     if (image.empty()) break;
-        //     num_frames++;
-        //     width = image.cols;
-        //     height = image.rows;
-        // }
-        // video.release();
-        int fps = 5;
-        int width = 1936;
-        int height = 1216;
-        int num_frames = 150;
-        return std::make_tuple((int)fps, width, height, num_frames);
-    }
-
     void write_video(const std::vector<cv::Mat> &images, const std::filesystem::path &path, const size_t &fps)
     {
         if (images.size() == 0)
@@ -54,7 +23,8 @@ namespace
         }
     }
 
-    std::vector<std::vector<byte_track::Object>> read_json(std::filesystem::path jsondir, std::string basename, int cat_index, int im_width, int im_height, int num_frames)
+    // key: frame id, value: objects
+    std::map<size_t, std::vector<byte_track::Object>> read_json(std::filesystem::path jsondir, std::string basename, int cat_index, int im_width, int im_height)
     {
         auto jsonpath = jsondir;
         jsonpath.append(basename + "_detection_result_" + std::to_string(cat_index) + ".json");
@@ -70,8 +40,7 @@ namespace
         auto jobj = json11::Json::parse(jsonstr, err);
         ifs.close();
 
-        std::vector<std::vector<byte_track::Object>> inputs_ref;
-        inputs_ref.resize(num_frames);
+        std::map<size_t, std::vector<byte_track::Object>> inputs_ref;
         for(auto result: jobj["results"].array_items())
         {
             const auto frame_id = std::stoi(result["frame_id"].string_value());
@@ -80,6 +49,7 @@ namespace
             const auto y = std::clamp(std::stof(result["y"].string_value()), 0.F, im_height - 1.F);
             const auto width = std::clamp(std::stof(result["width"].string_value()), 0.F, im_width - x);
             const auto height = std::clamp(std::stof(result["height"].string_value()), 0.F, im_height - y);
+            inputs_ref.try_emplace(frame_id, std::vector<byte_track::Object>());
             inputs_ref[frame_id].emplace_back(byte_track::Rect(x, y, width, height), 0, prob);
         }
         return inputs_ref;
@@ -137,16 +107,6 @@ int main(int argc, char *argv[])
         std::cout << video_path.filename() << std::endl;
         const std::string video_basename = video_path.stem();
 
-        // Get video info
-        const auto [fps, width, height, num_frames] = get_video_info(video_path);
-
-        std::vector<std::vector<byte_track::Object>> json_inputs_car, json_inputs_pedestrian;
-        if (runmode == "json")
-        {
-            std::filesystem::path jsondir(argv[3]);
-            json_inputs_car = read_json(jsondir, video_basename, 0, width, height, num_frames);
-            json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height, num_frames);
-        }
         #ifdef DPU
         std::shared_ptr<YoloRunner> yolorunner;
         if(runmode == "dpu")
@@ -188,38 +148,63 @@ int main(int argc, char *argv[])
             throw std::runtime_error("Could not open the video file: " + video_path.string());
         }
 
-        int fi = 0;
-        while(true){
-            cv::Mat image;
-            video >> image;
-            if (image.empty()) break;
-            // draw_images.push_back(images[fi].clone());
+        const auto copy_results = [](const auto tracker_outputs, auto &outputs) -> void
+        {
+            outputs.emplace_back();
+            for (const auto &tracker_output : tracker_outputs)
+            {
+                // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
+                outputs.back().push_back(*tracker_output.get());
+            }
+        };
 
-            const auto copy = [](const auto tracker_outputs, auto &outputs) -> void
-            {
-                outputs.emplace_back();
-                for (const auto &tracker_output : tracker_outputs)
-                {
-                    // Copy from std::vector<std::shared_ptr<byte_track::STrack>> to std::vector<byte_track::STrack>
-                    outputs.back().push_back(*tracker_output.get());
-                }
-            };
-            byte_track::FeatureProvider fp(image);
-            if (runmode == "json")
-            {
-                copy(car_tracker.update(json_inputs_car[fi], fp), outputs_car);
-                copy(pedestrian_tracker.update(json_inputs_pedestrian[fi], fp), outputs_pedestrian);
-            }
-            else if (runmode == "dpu")
-            {
-                #ifdef DPU
-                auto detection_results = yolorunner->Run(image);
-                copy(car_tracker.update(detection_results[0], fp), outputs_car);
-                copy(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
-                #endif
-            }
-            fi++;
+        cv::Mat image;
+        video >> image;
+        if (image.empty())
+        {
+            throw std::runtime_error("The input video is empty.");
         }
+
+        const size_t width = image.cols;
+        const size_t height = image.rows;
+
+        int frame_cnt = 0;
+        if (runmode == "json")
+        {
+            std::filesystem::path jsondir(argv[3]);
+            auto json_inputs_car = read_json(jsondir, video_basename, 0, width, height);
+            auto json_inputs_pedestrian = read_json(jsondir, video_basename, 1, width, height);
+
+            while (true)
+            {
+                if (image.empty())
+                    break;
+                frame_cnt++;
+                // draw_images.push_back(images[fi].clone());
+                byte_track::FeatureProvider fp(image);
+                copy_results(car_tracker.update(json_inputs_car[frame_cnt - 1], fp), outputs_car);
+                copy_results(pedestrian_tracker.update(json_inputs_pedestrian[frame_cnt - 1], fp), outputs_pedestrian);
+                video >> image;
+            }
+        }
+        else if (runmode == "dpu")
+        {
+            #ifdef DPU
+            while (true)
+            {
+                if (image.empty())
+                    break;
+                frame_cnt++;
+                // draw_images.push_back(images[fi].clone());
+                byte_track::FeatureProvider fp(image);
+                auto detection_results = yolorunner->Run(image);
+                copy_results(car_tracker.update(detection_results[0], fp), outputs_car);
+                copy_results(pedestrian_tracker.update(detection_results[1], fp), outputs_pedestrian);
+                video >> image;
+            }
+            #endif
+        }
+
         video.release();
 
         // Results: vector of vector{track_id, rect}, and the idx means frame_id
@@ -247,7 +232,7 @@ int main(int argc, char *argv[])
             }
 
             // Validate
-            Results result(num_frames);
+            Results result(frame_cnt);
             for (const auto &[track_id, stracks] : map)
             {
                 if (stracks.size() < 3)
@@ -266,7 +251,7 @@ int main(int argc, char *argv[])
         auto results_pedestrian = validate_outputs(outputs_pedestrian);
         // Generate submit file
         std::vector<json11::Json> frame_objects;
-        for (int fi = 0; fi < num_frames; fi++)
+        for (int fi = 0; fi < frame_cnt; fi++)
         {
             //key: category
             //value: lists of tracked objects
