@@ -158,11 +158,11 @@ namespace
         size_t r_idx_{0}, w_idx_{0};
     };
     ObjWithMtx<bool> no_abnormality(true);
-    using InferenceFIFOElementType = std::pair<cv::Mat, std::vector<std::vector<byte_track::Object>>>;
-    constexpr auto InferenceFIFO_DEPTH = 30U;
+    using DetectionFIFOElementType = std::pair<cv::Mat, std::vector<std::vector<byte_track::Object>>>;
+    constexpr auto DetectionFIFO_DEPTH = 30U;
     constexpr auto SLEEP_T_US = 100U;
     std::vector<cv::Mat> video_images;
-    MultiThreadFIFO<InferenceFIFOElementType, InferenceFIFO_DEPTH> inference_fifo(SLEEP_T_US);
+    MultiThreadFIFO<DetectionFIFOElementType, DetectionFIFO_DEPTH> detection_fifo(SLEEP_T_US);
     std::mutex cout_guard;
     std::map<size_t, std::vector<byte_track::Object>> json_inputs_car;
     std::map<size_t, std::vector<byte_track::Object>> json_inputs_pedestrian;
@@ -171,8 +171,8 @@ namespace
     std::shared_ptr<YoloRunner> yolorunner;
     #endif
     std::string runmode;
-    float inference_time_sum = 0.0f;
-    void do_inference(){
+    float detection_time_sum = 0.0f;
+    void do_detection(){
         for(size_t frame_idx = 0; frame_idx < video_images.size(); frame_idx++)
         {
             cv::Mat img = video_images[frame_idx];
@@ -191,8 +191,8 @@ namespace
                 #endif
             }
             t_end = std::chrono::system_clock::now();
-            inference_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
-            inference_fifo.write(no_abnormality, end_flag, [&](InferenceFIFOElementType& dst) -> void {
+            detection_time_sum += (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
+            detection_fifo.write(no_abnormality, end_flag, [&](DetectionFIFOElementType& dst) -> void {
                 dst.first = img;
                 dst.second = detection_results;
             });
@@ -222,13 +222,13 @@ namespace
         while (!end_flag) {
             cv::Mat img;
             std::vector<std::vector<byte_track::Object>> detection_results;
-            inference_fifo.read(no_abnormality, [&](const InferenceFIFOElementType& src) -> void {
+            detection_fifo.read(no_abnormality, [&](const DetectionFIFOElementType& src) -> void {
                 img = src.first;
                 detection_results = src.second;
             });
             // auto detection_results = yolorunner->Run(img);
             frame_idx++;
-            end_flag = inference_fifo.neverReadNextElement();
+            end_flag = detection_fifo.neverReadNextElement();
             std::chrono::system_clock::time_point t_start, t_end;
             t_start = std::chrono::system_clock::now();
             byte_track::FeatureProvider fp(img);
@@ -454,7 +454,7 @@ int main(int argc, char *argv[])
 
 
         std::cout << "Start detection and tracking" << std::endl;
-        inference_fifo.init();
+        detection_fifo.init();
         std::cout << video_path.filename() << std::endl;
 
         #ifdef DPU
@@ -468,16 +468,16 @@ int main(int argc, char *argv[])
 
         std::chrono::system_clock::time_point t_start, t_end;
         t_start = std::chrono::system_clock::now();
-        auto inference   = std::thread(gen_func([&]() -> void { do_inference(); }));
+        auto detection   = std::thread(gen_func([&]() -> void { do_detection(); }));
         auto tracking = std::thread(gen_func([&]() -> void { do_tracking(); }));
-        inference.join();
+        detection.join();
         tracking.join();
         t_end = std::chrono::system_clock::now();
 
         float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
         std::map<std::string, float> time_summary = {
             {"frame_cnt", (float)frame_cnt},
-            {"inference_sum", inference_time_sum},
+            {"detection_sum", detection_time_sum},
             {"tracking_sum", tracking_time_sum},
             {"all_sum", all_time}
         };
