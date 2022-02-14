@@ -30,7 +30,7 @@ if [ $mode == "json" ]; then
     fi
     build $script_dir ""
     for video in $video_list; do
-        time $script_dir/build/generate_submit_file $video $mode $4
+        $script_dir/build/generate_submit_file $video $mode $4
     done
 elif [ $mode == "dpu" ]; then
     if [ $# -ne 5 ]; then
@@ -38,7 +38,7 @@ elif [ $mode == "dpu" ]; then
     fi
     build $script_dir "-DRISCV=ON -DDPU=ON"
     for video in $video_list; do
-        time $script_dir/build/generate_submit_file $video $mode $4 $5
+        $script_dir/build/generate_submit_file $video $mode $4 $5
     done
 else
     echo "Invalid mode is specified: $mode"
