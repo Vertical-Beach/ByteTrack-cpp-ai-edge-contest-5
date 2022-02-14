@@ -205,6 +205,7 @@ namespace
     std::shared_ptr<byte_track::BYTETracker> pedestrian_tracker;
 
     float tracking_time_sum = 0.0f;
+    byte_track::FeatureProviderCfg fp_cfg;
     void do_tracking(){
         bool end_flag = false;
         int frame_idx = 0;
@@ -231,7 +232,7 @@ namespace
             end_flag = detection_fifo.neverReadNextElement();
             std::chrono::system_clock::time_point t_start, t_end;
             t_start = std::chrono::system_clock::now();
-            byte_track::FeatureProvider fp(img);
+            byte_track::FeatureProvider fp(img, fp_cfg);
             copy_results(car_tracker->update(detection_results[0], fp), outputs_car);
             copy_results(pedestrian_tracker->update(detection_results[1], fp), outputs_pedestrian);
             t_end = std::chrono::system_clock::now();
@@ -431,7 +432,6 @@ int main(int argc, char *argv[])
         pedestrian_cfg.appearance_saturation_weight = 0.05f;
         pedestrian_cfg.dist_cost_max_pix = 100.0f;
 
-        byte_track::FeatureProviderCfg fp_cfg;
         fp_cfg.scale = 0.2f;
         fp_cfg.n_lbp_feature_hist_bins = 10;
         fp_cfg.n_hue_hist_bins = 10;
@@ -449,11 +449,11 @@ int main(int argc, char *argv[])
         }
         //write instruction
         riscv_imm(riscv_imem_base);
-        car_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base));
-        pedestrian_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(riscv_dmem_base=riscv_dmem_base));
+        car_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(riscv_dmem_base, car_cfg));
+        pedestrian_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(riscv_dmem_base, pedestrian_cfg));
         #else
-        car_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker());
-        pedestrian_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker());
+        car_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(car_cfg));
+        pedestrian_tracker = std::shared_ptr<byte_track::BYTETracker>(new byte_track::BYTETracker(pedestrian_cfg));
         #endif
 
 
