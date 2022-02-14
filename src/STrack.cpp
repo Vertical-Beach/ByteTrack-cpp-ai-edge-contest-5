@@ -75,6 +75,12 @@ const bool& byte_track::STrack::isActivated() const
 {
     return is_activated_;
 }
+
+const bool& byte_track::STrack::isOutOfFrame() const
+{
+    return out_of_frame_;
+}
+
 const float& byte_track::STrack::getScore() const
 {
     return score_;
@@ -182,6 +188,27 @@ void byte_track::STrack::updateRect(const bool &update_feature)
     rect_.height() = mean_[3];
     rect_.x() = mean_[0] - rect_.width() / 2;
     rect_.y() = mean_[1] - rect_.height() / 2;
+
+    const auto &im_width = fp_ptr_->getImageWidth();
+    const auto &im_height = fp_ptr_->getImageHeight();
+    if (rect_.x() < 0 || im_width <= rect_.x() + rect_.width() || rect_.y() < 0 || im_height <= rect_.y() + rect_.height())
+    {
+        Rect<float> new_rect;
+        new_rect.x() = std::max(0.0f, rect_.x());
+        new_rect.y() = std::max(0.0f, rect_.y());
+        new_rect.width() = (rect_.x() < 0) ? rect_.width() + rect_.x() : std::min(im_width - new_rect.x() - 1, rect_.width());
+        new_rect.height() = (rect_.y() < 0) ? rect_.height() + rect_.y() : std::min(im_height - new_rect.y() - 1, rect_.height());
+        mean_[0] = new_rect.x() + new_rect.width() / 2;
+        mean_[1] = new_rect.y() + new_rect.height() / 2;
+        mean_[2] = new_rect.width() / new_rect.height();
+        mean_[3] = new_rect.height();
+        mean_[4] = mean_[4] * (new_rect.width() / rect_.width());
+        mean_[5] = mean_[5] * (new_rect.height() / rect_.height());
+        mean_[6] = 0.0f;
+        mean_[7] = 0.0f;
+        rect_ = new_rect;
+        out_of_frame_ = true;
+    }
     if (update_feature)
     {
         updateFeature();
