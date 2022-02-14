@@ -14,7 +14,8 @@ namespace byte_track
 struct BYTETrackerCfg
 {
     size_t len_lost_time {5};
-    float track_thr {0.5f};
+    float track_high_thr {0.5f};
+    float track_low_thr {0.1f};
     float high_thr {0.6f};
 
     float first_match_thr {0.8f};
@@ -32,6 +33,8 @@ struct BYTETrackerCfg
     float start_cost_appearance_cost {0.95f};
     float step_dist_cost {0.1f};
     float step_appearance_cost {0.05f};
+
+    float center_area_horizontal_offset_ratio {0.5};
 
     float appearance_rect_h_padding_ratio {0.0f};
     float appearance_rect_v_padding_ratio {0.0f};

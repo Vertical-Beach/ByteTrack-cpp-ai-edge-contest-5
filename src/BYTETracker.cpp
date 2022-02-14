@@ -43,11 +43,11 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
             cfg_.appearance_block_v_size
         );
 
-        if (object.prob >= cfg_.track_thr)
+        if (cfg_.track_high_thr < object.prob)
         {
             det_stracks.push_back(strack);
         }
-        else
+        else if (cfg_.track_low_thr < object.prob)
         {
             det_low_stracks.push_back(strack);
         }
@@ -126,6 +126,7 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
 
     ////////////////// Step 3: Second association, using low score dets //////////////////
     std::vector<STrackPtr> current_lost_stracks;
+    std::vector<STrackPtr> current_removed_stracks;
 
     {
         std::vector<std::vector<int>> matches_idx;
@@ -156,15 +157,21 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
             const auto track = remain_tracked_stracks[unmatch_track];
             if (track->getSTrackState() != STrackState::Lost)
             {
-                track->markAsLost();
-                current_lost_stracks.push_back(track);
+                if (track->isOutOfFrame() || track->getTrackletLength() == 1)
+                {
+                    track->markAsRemoved();
+                    current_removed_stracks.push_back(track);
+                }
+                else
+                {
+                    track->markAsLost();
+                    current_lost_stracks.push_back(track);
+                }
             }
         }
     }
 
     ////////////////// Step 4: Init new stracks //////////////////
-    std::vector<STrackPtr> current_removed_stracks;
-
     {
         std::vector<int> unmatch_detection_idx;
         std::vector<int> unmatch_unconfirmed_idx;
@@ -359,36 +366,20 @@ std::vector<std::vector<float>> byte_track::BYTETracker::calcFirstCostMatrix(con
     const auto width = a_tracks[0]->getFeatureProviderPtr()->getImageHeight();
     for (size_t ai = 0; ai < a_tracks.size(); ai++)
     {
-        /*
-        const auto &a_rect = a_tracks[ai]->getRect();
-        const auto &a_prev_rect = a_tracks_prev[ai].getRect();
-        */
         const auto &a_rect = a_tracks[ai]->getRect();
         const auto a_rect_cx = a_rect.x() + a_rect.width() / 2;
         const auto a_rect_cy = a_rect.y() + a_rect.height() / 2;
-        const auto stray_a_rect = (a_rect_cx < 0 || a_rect_cy < 0 || width <= a_rect_cx || height <= a_rect_cy);
+        const auto a_rect_is_out_of_frame = (a_rect_cx < 0 || a_rect_cy < 0 || width <= a_rect_cx || height <= a_rect_cy);
         for (size_t bi = 0; bi < b_tracks.size(); bi++)
         {
-            /*
-            const auto &b_rect = b_tracks[bi]->getRect();
-            const auto draw_rect = [](cv::Mat &image, const cv::Rect2i &rect, const cv::Scalar &color, const std::string &label)
-            {
-                cv::rectangle(image, rect.tl(), rect.br(), color, 5);
-                cv::putText(image, label, cv::Point(rect.tl().x, rect.tl().y - 10), cv::FONT_HERSHEY_PLAIN, 1, color, 1, cv::LINE_AA);
-            };
-            const auto &fp_ptr = b_tracks[bi]->getFeatureProviderPtr();
-            cv::Mat scaled_image = fp_ptr->getScaledImage().clone();
-            draw_rect(scaled_image, fp_ptr->rect2ScaledRect2i(a_rect), cv::Scalar(255, 0, 0), "Prediction");
-            draw_rect(scaled_image, fp_ptr->rect2ScaledRect2i(a_prev_rect), cv::Scalar(0, 255, 0), "Base");
-            draw_rect(scaled_image, fp_ptr->rect2ScaledRect2i(b_rect), cv::Scalar(0, 0, 255), "Detection");
-            std::cout << "ai: " << ai << ", bi: " << bi << std::endl;
-            cv::imshow("scaled_image", scaled_image);
-            cv::waitKey(0);
-            */
             const auto &b_rect = b_tracks[bi]->getRect();
             const auto area_retio = a_rect.area() / b_rect.area();
 
-            if (cfg_.max_area_retio < area_retio || cfg_.min_appearance_cost < appearance_cost[ai][bi].first)
+            if (cfg_.min_appearance_cost < appearance_cost[ai][bi].first)
+            {
+                cost_matrix[ai][bi] = 1;
+            }
+            else if (cfg_.max_area_retio < area_retio)
             {
                 cost_matrix[ai][bi] = 1;
             }
@@ -396,14 +387,14 @@ std::vector<std::vector<float>> byte_track::BYTETracker::calcFirstCostMatrix(con
             {
                 cost_matrix[ai][bi] = 1;
             }
-            else if (stray_a_rect && cfg_.min_appearance_cost_for_stray_rect < appearance_cost[ai][bi].first)
+            else if (a_rect_is_out_of_frame && cfg_.min_appearance_cost_for_stray_rect < appearance_cost[ai][bi].first)
             {
                 cost_matrix[ai][bi] = 1;
             }
             else
             {
                 cost_matrix[ai][bi] = iou_cost[ai][bi];
-                if (!stray_a_rect && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
+                if (!a_rect_is_out_of_frame && dist_cost[ai][bi].first != std::numeric_limits<float>::max())
                 {
                     const auto &dist_sort_idx = dist_cost[ai][bi].second;
                     if (dist_sort_idx < cfg_.max_len_dist_cost)
@@ -514,12 +505,6 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
         const auto &a_hue_feature = a_track.getHueFeature();
         const auto &a_saturation_feature = a_track.getSaturationFeature();
 
-        /*
-        const auto &a_rect_prev = a_track.getRect();
-        const auto &fp_ptr = a_track.getFeatureProviderPtr();
-        cv::Mat scaled_image = fp_ptr->getScaledImage().clone();
-        */
-
         for (size_t bi = 0; bi < b_tracks.size(); bi++)
         {
             const auto &b_track = b_tracks[bi];
@@ -531,71 +516,6 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
             const auto hue_simirality = calcCosSimilarity(a_hue_feature, b_hue_feature);
             const auto saturation_simirality = calcCosSimilarity(a_saturation_feature, b_saturation_feature);
 
-            /*
-            std::cout << "a_lbp_feature: ";
-            for (const auto &v : a_lbp_feature)
-            {
-                std::cout << v << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "b_lbp_feature: ";
-            for (const auto &v : b_lbp_feature)
-            {
-                std::cout << v << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "simirality: " << lbp_simirality << std::endl;
-
-            std::cout << "a_hue_feature: ";
-            for (const auto &v : a_hue_feature)
-            {
-                std::cout << v << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "b_hue_feature: ";
-            for (const auto &v : b_hue_feature)
-            {
-                std::cout << v << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "simirality_hue: " << hue_simirality << std::endl;
-
-            std::cout << "a_saturation_feature: ";
-            for (const auto &v : a_saturation_feature)
-            {
-                std::cout << v << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "b_saturation_feature: ";
-            for (const auto &v : b_saturation_feature)
-            {
-                std::cout << v << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "simirality_saturation: " << saturation_simirality << std::endl;
-
-            const auto draw_rect = [](cv::Mat &image, const cv::Rect2i &rect, const cv::Scalar &color, const std::string &label)
-            {
-                cv::rectangle(image, rect.tl(), rect.br(), color, 5);
-                cv::putText(image, label, cv::Point(rect.tl().x, rect.tl().y - 10), cv::FONT_HERSHEY_PLAIN, 1, color, 1, cv::LINE_AA);
-            };
-            const auto &b_rect = b_track->getRect();
-            const auto a_scaled_rect_prev = fp_ptr->rect2ScaledRect2i(a_rect_prev);
-            const auto b_scaled_rect = fp_ptr->rect2ScaledRect2i(b_rect);
-
-            cv::Mat draw_scaled_image = scaled_image.clone();
-            draw_rect(draw_scaled_image, a_scaled_rect_prev, cv::Scalar(0, 255, 0), "Base");
-            draw_rect(draw_scaled_image, b_scaled_rect, cv::Scalar(0, 0, 255), "Detection");
-            cv::namedWindow("scaled_image", cv::WINDOW_NORMAL);
-            cv::imshow("scaled_image", draw_scaled_image);
-            cv::waitKey(0);
-            */
             const auto w_mean = cfg_.appearance_lbp_weight * lbp_simirality +
                                 cfg_.appearance_hue_weight * hue_simirality +
                                 cfg_.appearance_saturation_weight * saturation_simirality;
@@ -684,6 +604,7 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
         const auto a_v_norm = std::sqrt(a_xv * a_xv + a_yv * a_yv);
         const auto a_rect_short_side_len = std::max(a_track->getRect().width(), a_track->getRect().height());
         const auto dist_near_pix = std::min(cfg_.dist_cost_max_pix, a_rect_short_side_len / 2);
+        const auto &im_width = a_track->getFeatureProviderPtr()->getImageWidth();
         for (size_t bi = 0; bi < b_tracks.size(); bi++)
         {
             const auto &b_rect = b_tracks[bi]->getRect();
@@ -697,11 +618,15 @@ std::vector<std::vector<std::pair<float, size_t>>> byte_track::BYTETracker::calc
             {
                 distances_with_idx.emplace_back(dist, bi);
             }
+            else if (im_width * cfg_.center_area_horizontal_offset_ratio < a_xc && a_xc <= im_width * (1 - cfg_.center_area_horizontal_offset_ratio))
+            {
+                distances_with_idx.emplace_back(std::numeric_limits<float>::max(), bi);
+            }
             else
             {
                 const auto cos = (a_xv * b_xv + a_yv * b_yv) / (a_v_norm * b_v_norm);
                 if ((dist < dist_near_pix) ||
-                    ((a_xv != 0 && a_yv != 0) && 0 < cos && dist < cfg_.dist_cost_max_pix) ||
+                    ((a_xv != 0 && a_yv != 0) && M_PI / 4 < cos && dist < cfg_.dist_cost_max_pix) ||
                     ((a_xv == 0 && a_yv == 0) && dist < cfg_.dist_cost_max_pix))
                 {
                     distances_with_idx.emplace_back(dist, bi);

@@ -41,6 +41,7 @@ public:
     const FeatureProviderPtr& getFeatureProviderPtr() const;
 
     const bool& isActivated() const;
+    const bool& isOutOfFrame() const;
     const float& getScore() const;
     const size_t& getTrackId() const;
     const size_t& getFrameId() const;
@@ -77,6 +78,7 @@ private:
     std::vector<float> saturation_feature_;
 
     bool is_activated_;
+    bool out_of_frame_ {false};
     float score_;
     size_t track_id_;
     size_t frame_id_;
