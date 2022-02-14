@@ -43,11 +43,11 @@ std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(
             cfg_.appearance_block_v_size
         );
 
-        if (object.prob >= cfg_.track_thr)
+        if (cfg_.track_high_thr < object.prob)
         {
             det_stracks.push_back(strack);
         }
-        else
+        else if (cfg_.track_low_thr < object.prob)
         {
             det_low_stracks.push_back(strack);
         }
