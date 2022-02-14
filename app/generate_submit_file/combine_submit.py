@@ -19,18 +19,28 @@ else:
         resmap[videoname] = videores
     open("predictions.json", "w").write(json.dumps(resmap))
 
-    inference_times = []
-    tracking_times = []
-    all_time_sum = 0
+    inference_time_videos = []
+    inference_time_frames = []
+    tracking_time_videos = []
+    tracking_time_frames = []
+    all_time_videos = []
+    all_time_frames = []
     time_summary_files = glob.glob("time_summary_" + video_name_prefix + "*.json")
     for file in time_summary_files:
         video_idx = file[-7:]
         video_idx = video_idx[:2]
         timeres = json.loads(open(f"./time_summary_{video_name_prefix}_{video_idx}.json").read())
-        inference_times.append(timeres["inference"])
-        tracking_times.append(timeres["tracking"])
-        all_time_sum += timeres["all"]
+        frame_cnt = int(timeres["frame_cnt"])
+        inference_time_videos.append(timeres["inference_sum"])
+        inference_time_frames.append(timeres["inference_sum"]/frame_cnt)
+        tracking_time_videos.append(timeres["tracking_sum"])
+        tracking_time_frames.append(timeres["tracking_sum"]/frame_cnt)
+        all_time_videos.append(timeres["all_sum"])
+        all_time_frames.append(timeres["all_sum"]/frame_cnt)
     print("time summary:")
-    print("inference avg.", np.mean(np.array(inference_times)), "[ms]")
-    print("tracking avg.", np.mean(np.array(tracking_times)), "[ms]")
-    print("all time sum.", all_time_sum, "[ms]")
+    print("inference : {:.2f}ms/frame {:.2f}ms/video".format(
+        np.mean(np.array(inference_time_frames)), np.mean(np.array(inference_time_videos))))
+    print("tracking : {:.2f}ms/frame {:.2f}ms/video".format(
+        np.mean(np.array(tracking_time_frames)), np.mean(np.array(tracking_time_videos))))
+    print("inference + tracking : {:.2f}ms/frame {:.2f}ms/video".format(
+        np.mean(np.array(all_time_frames)), np.mean(np.array(all_time_videos))))

@@ -476,9 +476,10 @@ int main(int argc, char *argv[])
 
         float all_time = (float)std::chrono::duration_cast<std::chrono::milliseconds>(t_end-t_start).count();
         std::map<std::string, float> time_summary = {
-            {"inference", inference_time_sum/(float)frame_cnt},
-            {"tracking", tracking_time_sum/(float)frame_cnt},
-            {"all", all_time}
+            {"frame_cnt", (float)frame_cnt},
+            {"inference_sum", inference_time_sum},
+            {"tracking_sum", tracking_time_sum},
+            {"all_sum", all_time}
         };
         std::ofstream timefile;
         timefile.open((std::string)"time_summary_" + (std::string)video_path.stem() + (std::string)".json");

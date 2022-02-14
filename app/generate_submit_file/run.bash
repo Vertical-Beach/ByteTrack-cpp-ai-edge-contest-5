@@ -47,3 +47,4 @@ fi
 
 python3 $script_dir/combine_submit.py $prefix
 ls -1 | grep -E "^prediction\_$prefix\_[0-9]{2}\.json$" | xargs rm
+ls -1 | grep -E "^time_summary\_$prefix\_[0-9]{2}\.json$" | xargs rm
