@@ -68,27 +68,3 @@ target_link_libraries(${PROJECT_NAME}
   ${EIGEN3_LIBS}
   ${OpenCV_LIBS}
   )
-
-# Build the tests if the 'BUILD_BYTETRACK_TEST' variable is set to 'ON'
-set(BUILD_BYTETRACK_TEST OFF CACHE BOOL "The flag whether to build the tests or not")
-if(BUILD_BYTETRACK_TEST)
-  enable_testing()
-
-  find_package(GTest QUIET)
-  if(NOT GTest_FOUND)
-    message(FATAL_ERROR "GTest not found.")
-  endif()
-
-  add_executable(${PROJECT_NAME}_test
-    ${PROJECT_SOURCE_DIR}/test/test_BYTETracker.cpp
-  )
-
-  target_link_libraries(${PROJECT_NAME}_test
-    ${PROJECT_NAME}
-    GTest::GTest
-    GTest::Main
-    )
-
-  gtest_discover_tests(${PROJECT_NAME}_test
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/YOLOX_ncnn_palace)
-endif()

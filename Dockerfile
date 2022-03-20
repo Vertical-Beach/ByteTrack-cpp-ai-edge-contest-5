@@ -15,18 +15,6 @@ RUN apt update && apt install -y --no-install-recommends \
     apt clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install GTest
-RUN apt update && apt install -y --no-install-recommends \
-    libgtest-dev && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Boost
-RUN apt update && apt install -y --no-install-recommends \
-    libboost-dev && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/*
-
 # Install latest CMake
 RUN git clone -b release --depth=1 https://github.com/Kitware/CMake.git && cd CMake && \
     ./bootstrap && make -j "$(nproc)" && make install && \
